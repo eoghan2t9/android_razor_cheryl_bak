@@ -1104,6 +1104,7 @@ static int __init devfreq_init(void)
 
 	devfreq_wq = alloc_workqueue("devfreq_wq", WQ_FREEZABLE |
 				WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS, MAX_DEVFREQ_ACTIVE);
+
 	if (!devfreq_wq) {
 		class_destroy(devfreq_class);
 		pr_err("%s: couldn't create workqueue\n", __FILE__);
