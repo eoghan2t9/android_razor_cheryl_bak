@@ -917,6 +917,14 @@ struct usb_config_summary_descriptor {
 	__u8 bMaxPower;
 	__u8 bNumFunctions;
 	struct function_class_info cs_info[];
+ * Precision time measurement capability descriptor: advertised by devices and
+ * hubs that support PTM
+ */
+#define	USB_PTM_CAP_TYPE	0xb
+struct usb_ptm_cap_descriptor {
+	__u8  bLength;
+	__u8  bDescriptorType;
+	__u8  bDevCapabilityType;
 } __attribute__((packed));
 
 /*-------------------------------------------------------------------------*/
