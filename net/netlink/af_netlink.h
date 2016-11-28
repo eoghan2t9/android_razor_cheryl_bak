@@ -3,6 +3,7 @@
 
 #include <linux/rhashtable.h>
 #include <linux/atomic.h>
+#include <linux/workqueue.h>
 #include <net/sock.h>
 
 #define NLGRPSZ(x)	(ALIGN(x, sizeof(unsigned long) * 8) / 8)
@@ -50,8 +51,9 @@ struct netlink_sock {
 	struct netlink_ring	tx_ring;
 	atomic_t		mapped;
 #endif /* CONFIG_NETLINK_MMAP */
-
 	struct rhash_head	node;
+	struct rcu_head		rcu;
+	struct work_struct	work;
 };
 
 static inline struct netlink_sock *nlk_sk(struct sock *sk)
