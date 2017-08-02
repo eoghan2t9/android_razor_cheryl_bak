@@ -1886,6 +1886,12 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
 		goto err_wmi_detach;
 	}
 
+	/* If firmware indicates Full Rx Reorder support it must be used in a
+	 * slightly different manner. Let HTT code know.
+	 */
+	ar->htt.rx_ring.in_ord_rx = !!(test_bit(WMI_SERVICE_RX_FULL_REORDER,
+						ar->wmi.svc_map));
+
 	status = ath10k_htt_rx_alloc(&ar->htt);
 	if (status) {
 		ath10k_err(ar, "failed to alloc htt rx: %d\n", status);
@@ -1974,34 +1980,6 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
 		ath10k_err(ar, "wmi unified ready event not received\n");
 		goto err_hif_stop;
 	}
-
-	/* Some firmware revisions do not properly set up hardware rx filter
-	 * registers.
-	 *
-	 * A known example from QCA9880 and 10.2.4 is that MAC_PCU_ADDR1_MASK
-	 * is filled with 0s instead of 1s allowing HW to respond with ACKs to
-	 * any frames that matches MAC_PCU_RX_FILTER which is also
-	 * misconfigured to accept anything.
-	 *
-	 * The ADDR1 is programmed using internal firmware structure field and
-	 * can't be (easily/sanely) reached from the driver explicitly. It is
-	 * possible to implicitly make it correct by creating a dummy vdev and
-	 * then deleting it.
-	 */
-	if (!QCA_REV_WCN3990(ar)) {
-		status = ath10k_core_reset_rx_filter(ar);
-		if (status) {
-			ath10k_err(ar, "failed to reset rx filter: %d\n",
-				   status);
-			goto err_hif_stop;
-		}
-	}
-
-	/* If firmware indicates Full Rx Reorder support it must be used in a
-	 * slightly different manner. Let HTT code know.
-	 */
-	ar->htt.rx_ring.in_ord_rx = !!(test_bit(WMI_SERVICE_RX_FULL_REORDER,
-						ar->wmi.svc_map));
 
 	status = ath10k_htt_rx_ring_refill(ar);
 	if (status) {
