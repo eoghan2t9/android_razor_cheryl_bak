@@ -9414,9 +9414,9 @@ enum dot11p_mode {
 
 /* Hold wakelock for unicast RX packets for the specified duration  */
 #define CFG_RX_WAKELOCK_TIMEOUT_NAME     "rx_wakelock_timeout"
-#define CFG_RX_WAKELOCK_TIMEOUT_DEFAULT  (50)
+#define CFG_RX_WAKELOCK_TIMEOUT_DEFAULT  (10)
 #define CFG_RX_WAKELOCK_TIMEOUT_MIN      (0)
-#define CFG_RX_WAKELOCK_TIMEOUT_MAX      (100)
+#define CFG_RX_WAKELOCK_TIMEOUT_MAX      (50)
 
 /*
  * <ini>
