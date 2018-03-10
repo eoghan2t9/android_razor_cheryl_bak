@@ -112,3 +112,13 @@ all.config
 
 # Kdevelop4
 *.kdev4
+
+# build output folder
+/out/
+
+# Dont Upload Built Kernel
+/AnyKernel/Image.gz-dtb
+/AnyKernel/modules/*.ko
+/AnyKernel/*.zip
+/AnyKernel/*.md5
+net/wireguard/
