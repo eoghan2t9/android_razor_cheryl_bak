@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -46,7 +46,7 @@
 #define QDF_NBUF_PKT_TRAC_TYPE_MGMT_ACTION	0x08
 #define QDF_NBUF_PKT_TRAC_TYPE_ARP		0x10
 #define QDF_NBUF_PKT_TRAC_TYPE_ICMP		0x20
-#define QDF_NBUF_PKT_TRAC_TYPE_ICMPV6	0x40
+#define QDF_NBUF_PKT_TRAC_TYPE_ICMPv6		0x40
 
 #define QDF_NBUF_PKT_TRAC_MAX_STRING		12
 #define QDF_NBUF_PKT_TRAC_PROTO_STRING		4
@@ -93,6 +93,31 @@
 #define QDF_NBUF_PKT_ARPOP_REPLY	2
 #define QDF_NBUF_PKT_ARP_SRC_IP_OFFSET	28
 #define QDF_NBUF_PKT_ARP_TGT_IP_OFFSET	38
+
+/* ICMPv4 Related MASK */
+#define QDF_NBUF_PKT_ICMPv4_OPCODE_OFFSET	34
+#define QDF_NBUF_PKT_ICMPv4OP_REQ		0x08
+#define QDF_NBUF_PKT_ICMPv4OP_REPLY		0x00
+#define QDF_NBUF_PKT_ICMPv4_SRC_IP_OFFSET	26
+#define QDF_NBUF_PKT_ICMPv4_TGT_IP_OFFSET	30
+
+/* TCP Related MASK */
+#define QDF_NBUF_PKT_TCP_OPCODE_OFFSET		47
+#define QDF_NBUF_PKT_TCPOP_SYN			0x02
+#define QDF_NBUF_PKT_TCPOP_SYN_ACK		0x12
+#define QDF_NBUF_PKT_TCPOP_ACK			0x10
+#define QDF_NBUF_PKT_TCP_SRC_PORT_OFFSET	34
+#define QDF_NBUF_PKT_TCP_DST_PORT_OFFSET	36
+
+/* DNS Related MASK */
+#define QDF_NBUF_PKT_DNS_OVER_UDP_OPCODE_OFFSET	44
+#define QDF_NBUF_PKT_DNSOP_BITMAP		0xF800
+#define QDF_NBUF_PKT_DNSOP_STANDARD_QUERY	0x0000
+#define QDF_NBUF_PKT_DNSOP_STANDARD_RESPONSE	0x8000
+#define QDF_NBUF_PKT_DNS_SRC_PORT_OFFSET	34
+#define QDF_NBUF_PKT_DNS_DST_PORT_OFFSET	36
+#define QDF_NBUF_PKT_DNS_NAME_OVER_UDP_OFFSET	54
+#define QDF_NBUF_PKT_DNS_STANDARD_PORT		53
 
 /* Tracked Packet types */
 #define QDF_NBUF_TX_PKT_INVALID              0
@@ -231,7 +256,7 @@ struct mon_rx_status {
  * @QDF_PROTO_TYPE_ARP - ARP
  * @QDF_PROTO_TYPE_MGMT - MGMT
  * @QDF_PROTO_TYPE_ICMP - ICMP
- * @QDF_PROTO_TYPE_ICMPV6 - ICMPV6
+ * @QDF_PROTO_TYPE_ICMPv6 - ICMPv6
  * QDF_PROTO_TYPE_EVENT - EVENT
  */
 enum qdf_proto_type {
@@ -240,7 +265,7 @@ enum qdf_proto_type {
 	QDF_PROTO_TYPE_ARP,
 	QDF_PROTO_TYPE_MGMT,
 	QDF_PROTO_TYPE_ICMP,
-	QDF_PROTO_TYPE_ICMPV6,
+	QDF_PROTO_TYPE_ICMPv6,
 	QDF_PROTO_TYPE_EVENT,
 	QDF_PROTO_TYPE_MAX
 };
@@ -679,6 +704,8 @@ void qdf_net_buf_debug_delete_node(qdf_nbuf_t net_buf);
 void qdf_net_buf_debug_acquire_skb(qdf_nbuf_t net_buf,
 			uint8_t *file_name, uint32_t line_num);
 void qdf_net_buf_debug_release_skb(qdf_nbuf_t net_buf);
+void qdf_netbuf_free_debug_add(qdf_nbuf_t net_buf, uint8_t *file_name,
+			       uint32_t line_num);
 
 /* nbuf allocation rouines */
 
@@ -700,15 +727,20 @@ qdf_nbuf_alloc_debug(qdf_device_t osdev, qdf_size_t size, int reserve,
 	return net_buf;
 }
 
-static inline void qdf_nbuf_free(qdf_nbuf_t net_buf)
+#define qdf_nbuf_free(d)			\
+	qdf_nbuf_free_debug(d, __FILE__, __LINE__)
+static inline void qdf_nbuf_free_debug(qdf_nbuf_t net_buf,
+				       uint8_t *file_name, uint32_t line_num)
 {
 	if (qdf_nbuf_is_tso(net_buf) &&
 			qdf_nbuf_get_users(net_buf) > 1)
 		goto free_buf;
 
 	/* Remove SKB from internal QDF tracking table */
-	if (qdf_likely(net_buf))
+	if (qdf_likely(net_buf)) {
+		qdf_netbuf_free_debug_add(net_buf, file_name, line_num);
 		qdf_net_buf_debug_delete_node(net_buf);
+	}
 
 free_buf:
 	__qdf_nbuf_free(net_buf);
@@ -1747,6 +1779,159 @@ uint32_t qdf_nbuf_get_arp_tgt_ip(qdf_nbuf_t buf)
 }
 
 /**
+ * qdf_nbuf_get_dns_domain_name() - get dns domain name of required length
+ * @buf: buffer
+ * @len: length to copy
+ *
+ * Return: dns domain name
+ */
+static inline
+uint8_t *qdf_nbuf_get_dns_domain_name(qdf_nbuf_t buf, uint32_t len)
+{
+	return __qdf_nbuf_get_dns_domain_name(qdf_nbuf_data(buf), len);
+}
+
+/**
+ * qdf_nbuf_data_is_dns_query() - check if skb data is a dns query
+ * @buf: buffer
+ *
+ * Return: true if packet is dns query packet.
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_dns_query(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_dns_query(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_dns_response() - check if skb data is a dns response
+ * @buf:  buffer
+ *
+ * Return: true if packet is dns response packet.
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_dns_response(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_dns_response(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_tcp_syn() - check if skb data is a tcp syn
+ * @buf:  buffer
+ *
+ * Return: true if packet is tcp syn packet.
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_tcp_syn(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_tcp_syn(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_tcp_syn_ack() - check if skb data is a tcp syn ack
+ * @buf:  buffer
+ *
+ * Return: true if packet is tcp syn ack packet.
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_tcp_syn_ack(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_tcp_syn_ack(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_tcp_ack() - check if skb data is a tcp ack
+ * @buf:  buffer
+ *
+ * Return: true if packet is tcp ack packet.
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_tcp_ack(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_tcp_ack(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_get_tcp_src_port() - get tcp src port
+ * @buf:  buffer
+ *
+ * Return: tcp source port value.
+ */
+static inline
+uint16_t qdf_nbuf_data_get_tcp_src_port(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_get_tcp_src_port(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_get_tcp_dst_port() - get tcp dst port
+ * @buf:  buffer
+ *
+ * Return: tcp destination port value.
+ */
+static inline
+uint16_t qdf_nbuf_data_get_tcp_dst_port(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_get_tcp_dst_port(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_icmpv4_req() - check if ICMPv4 packet is request.
+ * @buf:  buffer
+ *
+ * This func. checks whether it is a ICMPv4 request or not.
+ *
+ * Return: true if it is a ICMPv4 request or fALSE if not
+ */
+static inline
+bool qdf_nbuf_data_is_icmpv4_req(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_icmpv4_req(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_is_icmpv4_rsp() - check if ICMPv4 packet is res
+ * @buf:  buffer
+ *
+ * Return: true if packet is icmpv4 response
+ *	   false otherwise.
+ */
+static inline
+bool qdf_nbuf_data_is_icmpv4_rsp(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_data_is_icmpv4_rsp(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_get_icmpv4_src_ip() - get icmpv4 src IP
+ * @buf:  buffer
+ *
+ * Return: icmpv4 packet source IP value.
+ */
+static inline
+uint32_t qdf_nbuf_get_icmpv4_src_ip(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_get_icmpv4_src_ip(qdf_nbuf_data(buf));
+}
+
+/**
+ * qdf_nbuf_data_get_icmpv4_tgt_ip() - get icmpv4 target IP
+ * @buf:  buffer
+ *
+ * Return: icmpv4 packet target IP value.
+ */
+static inline
+uint32_t qdf_nbuf_get_icmpv4_tgt_ip(qdf_nbuf_t buf)
+{
+	return __qdf_nbuf_get_icmpv4_tgt_ip(qdf_nbuf_data(buf));
+}
+
+/**
  * qdf_nbuf_is_ipv6_pkt() - check if it is IPV6 packet.
  * @buf: Pointer to IPV6 packet buffer
  *
@@ -2329,5 +2514,37 @@ qdf_nbuf_reg_free_cb(qdf_nbuf_free_t cb_func_ptr)
 {
 	 __qdf_nbuf_reg_free_cb(cb_func_ptr);
 }
+
+#ifdef CONFIG_MCL
+/**
+ * qdf_nbuf_init_replenish_timer - Initialize the alloc replenish timer
+ *
+ * This function initializes the nbuf alloc fail replenish timer.
+ *
+ * Return: void
+ */
+static inline void
+qdf_nbuf_init_replenish_timer(void)
+{
+	__qdf_nbuf_init_replenish_timer();
+}
+
+/**
+ * qdf_nbuf_deinit_replenish_timer - Deinitialize the alloc replenish timer
+ *
+ * This function deinitializes the nbuf alloc fail replenish timer.
+ *
+ * Return: void
+ */
+static inline void
+qdf_nbuf_deinit_replenish_timer(void)
+{
+	__qdf_nbuf_deinit_replenish_timer();
+}
+#else
+
+static inline void qdf_nbuf_init_replenish_timer(void) {}
+static inline void qdf_nbuf_deinit_replenish_timer(void) {}
+#endif /* CONFIG_MCL */
 
 #endif /* _QDF_NBUF_H */
