@@ -17,7 +17,7 @@ VER="Razer-Kernel-V1"
 # Paths
 KERNEL_DIR=$(pwd)
 REPACK_DIR="AnyKernel"
-MODULES_DIR="$REPACK_DIR/modules"
+MODULES_DIR="$REPACK_DIR/modules/system/lib/modules/"
 ZIP_MOVE="$KERNEL_DIR/out/RZR"
 ZIMAGE_DIR="$KERNEL_DIR/out/arch/arm64/boot"
 
@@ -45,8 +45,9 @@ function make_kernel {
 }
 
 function make_modules {
-  rm `echo $MODULES_DIR"/*"`
-  find $KERNEL_DIR -name '*.ko' -exec cp {} $MODULES_DIR \;
+  pwd
+  rm AnyKernel/modules/system/lib/modules/*.ko
+  find $KERNEL_DIR -name '*.ko' -exec cp -vrf {} $MODULES_DIR \;
   ${CROSS_COMPILE}strip --strip-unneeded $MODULES_DIR/*
 }
 
