@@ -249,6 +249,9 @@ static void cpuboost_input_event(struct input_handle *handle,
 	if ((now - last_input_time) < (input_boost_ms * USEC_PER_MSEC))
 		return;
 
+	if (queuing_blocked(&cpu_boost_worker, &input_boost_work))
+		return;
+
 	// alex.naidis@paranoidandroid.co Rework scheduling setup - start
 	queue_kthread_work(&cpu_boost_worker, &input_boost_work);
 	// alex.naidis@paranoidandroid.co Rework scheduling setup - end
