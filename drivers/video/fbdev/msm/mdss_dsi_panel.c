@@ -35,15 +35,13 @@
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
-<<<<<<< HEAD
 static int mdss_dsi_ie_sre_mode(struct mdss_panel_data *pdata, u32 mode);
-=======
+
 bool display_on = true;
 bool is_display_on()
 {
 	return display_on;
 }
->>>>>>> 7af353a... display: add a simple api to query the display state (on/off) at any.
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -1072,15 +1070,11 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-<<<<<<< HEAD
 	ATRACE_FUNC();
 
-=======
-	
 	display_on = true;
 	
     pr_err("%s start\n", __func__);
->>>>>>> 7af353a... display: add a simple api to query the display state (on/off) at any.
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
