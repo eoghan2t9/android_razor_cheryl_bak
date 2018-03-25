@@ -2338,7 +2338,6 @@ void ext4_free_encryption_info(struct inode *inode, struct ext4_crypt_info *ci);
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 int ext4_has_encryption_key(struct inode *inode);
 
-<<<<<<< HEAD
 static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
 {
 	return EXT4_I(inode)->i_crypt_info;
