@@ -4,7 +4,7 @@
 ## AnyKernel setup
 # begin properties
 properties() {
-kernel.string=Razer Phone Kernel
+kernel.string=Papa Smurf Kernel
 do.devicecheck=0
 do.modules=1
 do.cleanup=1
