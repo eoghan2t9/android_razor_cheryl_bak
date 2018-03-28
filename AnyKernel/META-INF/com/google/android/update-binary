@@ -137,6 +137,23 @@ if [ "$(file_getprop /tmp/anykernel/anykernel.sh do.modules)" == 1 ]; then
   cd /tmp/anykernel;
   mount -o ro,remount -t auto /system;
   mount -o ro,remount -t auto /vendor 2>/dev/null;
+  ui_print "Modules Installed...";
+  ui_print " ";
+fi;
+
+# Root Installer
+if [ "$(file_getprop /tmp/anykernel/anykernel.sh do.rootcheck)" == 1 ]; then
+  if [ ! -f /sdcard/noroot ]; then
+	  ui_print "Magisk Installation aborted due to:";
+      ui_print "File Found: /sdcard/noroot";
+      ui_print "TIP: If you want root delete that file and reflash kernel...";
+  else
+      ui_print "Installing Magisk...";
+      unzip /tmp/anykernel/magisk/mg.zip -d /tmp/anykernel/magisk;
+      sh /tmp/anykernel/magisk/META-INF/com/google/android/update-binary dummy 1 /tmp/anykernel/magisk/mg.zip;
+      ui_print "Magisk Installation Completed...";
+
+  fi;
 fi;
 
 debugging;
