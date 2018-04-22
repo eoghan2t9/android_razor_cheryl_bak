@@ -264,7 +264,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	mutex_lock(&dev->buffer_lock);
 	ion_buffer_add(dev, buffer);
 	mutex_unlock(&dev->buffer_lock);
-	atomic_add(len, &heap->total_allocated);
+	atomic_long_add(len, &heap->total_allocated);
 	return buffer;
 
 err:
@@ -282,7 +282,7 @@ void ion_buffer_destroy(struct ion_buffer *buffer)
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
 	buffer->heap->ops->unmap_dma(buffer->heap, buffer);
 
-	atomic_sub(buffer->size, &buffer->heap->total_allocated);
+	atomic_long_sub(buffer->size, &buffer->heap->total_allocated);
 	buffer->heap->ops->free(buffer);
 	vfree(buffer->pages);
 	kfree(buffer);
@@ -320,7 +320,7 @@ static void ion_buffer_add_to_handle(struct ion_buffer *buffer)
 {
 	mutex_lock(&buffer->lock);
 	if (buffer->handle_count == 0)
-		atomic_add(buffer->size, &buffer->heap->total_handles);
+		atomic_long_add(buffer->size, &buffer->heap->total_handles);
 
 	buffer->handle_count++;
 	mutex_unlock(&buffer->lock);
@@ -346,7 +346,7 @@ static void ion_buffer_remove_from_handle(struct ion_buffer *buffer)
 		task = current->group_leader;
 		get_task_comm(buffer->task_comm, task);
 		buffer->pid = task_pid_nr(task);
-		atomic_sub(buffer->size, &buffer->heap->total_handles);
+		atomic_long_sub(buffer->size, &buffer->heap->total_handles);
 	}
 	mutex_unlock(&buffer->lock);
 }
@@ -1473,6 +1473,28 @@ int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle)
 }
 EXPORT_SYMBOL(ion_share_dma_buf_fd);
 
+bool ion_dma_buf_is_secure(struct dma_buf *dmabuf)
+{
+	struct ion_buffer *buffer;
+	enum ion_heap_type type;
+
+	/* Return false if we didn't create the buffer */
+	if (!dmabuf || dmabuf->ops != &dma_buf_ops)
+		return false;
+
+	buffer = dmabuf->priv;
+
+	if (!buffer || !buffer->heap)
+		return false;
+
+	type = buffer->heap->type;
+
+	return (type == (enum ion_heap_type)ION_HEAP_TYPE_SECURE_DMA ||
+		type == (enum ion_heap_type)ION_HEAP_TYPE_SYSTEM_SECURE) ?
+		true : false;
+}
+EXPORT_SYMBOL(ion_dma_buf_is_secure);
+
 struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd)
 {
 	struct dma_buf *dmabuf;
@@ -1539,6 +1561,11 @@ static int ion_sync_for_device(struct ion_client *client, int fd)
 	}
 	buffer = dmabuf->priv;
 
+	if (get_secure_vmid(buffer->flags) > 0) {
+		pr_err("%s: cannot sync a secure dmabuf\n", __func__);
+		dma_buf_put(dmabuf);
+		return -EINVAL;
+	}
 	dma_sync_sg_for_device(NULL, buffer->sg_table->sgl,
 			       buffer->sg_table->nents, DMA_BIDIRECTIONAL);
 	dma_buf_put(dmabuf);
@@ -1929,10 +1956,10 @@ void show_ion_usage(struct ion_device *dev)
 					"Total orphaned size");
 	pr_info("---------------------------------\n");
 	plist_for_each_entry(heap, &dev->heaps, node) {
-		pr_info("%16.s 0x%16.x 0x%16.x\n",
-			heap->name, atomic_read(&heap->total_allocated),
-			atomic_read(&heap->total_allocated) -
-			atomic_read(&heap->total_handles));
+		pr_info("%16.s 0x%16.lx 0x%16.lx\n",
+			heap->name, atomic_long_read(&heap->total_allocated),
+			atomic_long_read(&heap->total_allocated) -
+			atomic_long_read(&heap->total_handles));
 		if (heap->debug_show)
 			heap->debug_show(heap, NULL, 0);
 

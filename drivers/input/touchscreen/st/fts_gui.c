@@ -386,13 +386,13 @@ ssize_t fts_i2c_write_store(struct device *dev, struct device_attribute *attr,
 
 
 //static DEVICE_ATTR(iread,(S_IWUGO), NULL, fts_i2c_read_store);
-static DEVICE_ATTR(iread, S_IWUSR, NULL, fts_i2c_read_store);//Dennis
+static DEVICE_ATTR(iread, S_IWUSR, NULL, fts_i2c_read_store);
 static DEVICE_ATTR(iread_result,(S_IRUGO), fts_i2c_read_show, NULL);
 //static DEVICE_ATTR(iwr,(S_IWUGO), NULL, fts_i2c_wr_store);
 static DEVICE_ATTR(iwr,S_IWUSR, NULL, fts_i2c_wr_store);//
 static DEVICE_ATTR(iwr_result,(S_IRUGO), fts_i2c_wr_show, NULL);
 //static DEVICE_ATTR(iwrite,(S_IWUGO), NULL, fts_i2c_write_store);
-static DEVICE_ATTR(iwrite,S_IWUSR, NULL, fts_i2c_write_store);//Dennis
+static DEVICE_ATTR(iwrite,S_IWUSR, NULL, fts_i2c_write_store);
 static DEVICE_ATTR(iwrite_result,(S_IRUGO), fts_i2c_write_show, NULL);
 
 

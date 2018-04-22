@@ -802,7 +802,7 @@ static int bcache_device_init(struct bcache_device *d, unsigned block_size,
 	blk_queue_make_request(q, NULL);
 	d->disk->queue			= q;
 	q->queuedata			= d;
-	q->backing_dev_info.congested_data = d;
+	q->backing_dev_info->congested_data = d;
 	q->limits.max_hw_sectors	= UINT_MAX;
 	q->limits.max_sectors		= UINT_MAX;
 	q->limits.max_segment_size	= UINT_MAX;
@@ -1127,9 +1127,9 @@ static int cached_dev_init(struct cached_dev *dc, unsigned block_size)
 	set_capacity(dc->disk.disk,
 		     dc->bdev->bd_part->nr_sects - dc->sb.data_offset);
 
-	dc->disk.disk->queue->backing_dev_info.ra_pages =
-		max(dc->disk.disk->queue->backing_dev_info.ra_pages,
-		    q->backing_dev_info.ra_pages);
+	dc->disk.disk->queue->backing_dev_info->ra_pages =
+		max(dc->disk.disk->queue->backing_dev_info->ra_pages,
+		    q->backing_dev_info->ra_pages);
 
 	bch_cached_dev_request_init(dc);
 	bch_cached_dev_writeback_init(dc);
@@ -1489,6 +1489,7 @@ struct cache_set *bch_cache_set_alloc(struct cache_sb *sb)
 	mutex_init(&c->bucket_lock);
 	init_waitqueue_head(&c->btree_cache_wait);
 	init_waitqueue_head(&c->bucket_wait);
+	init_waitqueue_head(&c->gc_wait);
 	sema_init(&c->uuid_write_mutex, 1);
 
 	spin_lock_init(&c->btree_gc_time.lock);
@@ -1547,6 +1548,7 @@ static void run_cache_set(struct cache_set *c)
 
 	for_each_cache(ca, c, i)
 		c->nbuckets += ca->sb.nbuckets;
+	set_gc_sectors(c);
 
 	if (CACHE_SYNC(&c->sb)) {
 		LIST_HEAD(journal);

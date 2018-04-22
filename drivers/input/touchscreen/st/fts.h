@@ -29,7 +29,7 @@
 //**** CODE CONFIGURATION ****
 
 #define FTS_TS_DRV_NAME                     "fts"
-#define FTS_TS_DRV_VERSION                  "4.2.9" //version
+#define FTS_TS_DRV_VERSION                  "4.2.11" //version
 
 #define SCRIPTLESS			// allow to work in scriptless mode with the GUI
 #ifdef SCRIPTLESS
@@ -81,6 +81,8 @@
 #define STYLUS_MODE			//allow stylus mode feature (comment to disable)
 
 #define USE_NOISE_PARAM			//set noise params during resume (comment to disable)
+
+#define SIDE_TOUCH			//allow side touch detect (comment to disable)
 
 //**** END ****
 
@@ -269,6 +271,7 @@ struct fts_ts_info{
 		int edge_rej_enabled;
 		int corner_rej_enabled;
 		int edge_palm_rej_enabled;
+        int side_touch_enabled;
 
 //SW8-JH-ALT test+[
        struct workqueue_struct  *alt_test_wq;
@@ -281,9 +284,9 @@ struct fts_ts_info{
 
 int fts_chip_powercycle(struct fts_ts_info *info);
 int fts_chip_powercycle2(struct fts_ts_info *info, unsigned long sleep);
-int fts_get_fw_version(struct fts_ts_info *info);
-extern unsigned int le_to_uint(const unsigned char *ptr);
-extern unsigned int be_to_uint(const unsigned char *ptr);
+//int fts_get_fw_version(struct fts_ts_info *info);
+//extern unsigned int le_to_uint(const unsigned char *ptr);
+//extern unsigned int be_to_uint(const unsigned char *ptr);
 extern int input_register_notifier_client(struct notifier_block * nb);
 extern int input_unregister_notifier_client(struct notifier_block * nb);
 

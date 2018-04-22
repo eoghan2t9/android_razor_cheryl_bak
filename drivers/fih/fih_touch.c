@@ -8,6 +8,7 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
 
 #include "fih_touch.h"
 
@@ -66,15 +67,6 @@ struct fih_touch_cb touch_cb = {
 	.touch_alt_rst = NULL,
 	.touch_alt_st_count = NULL,
 	.touch_alt_st_enable = NULL,
-#if 0
-	.touch_scover_write = NULL,
-	.touch_scover_read = NULL,
-	.touch_gesture_write = NULL,
-	.touch_gesture_read = NULL,
-	.touch_gesture_available_read = NULL,
-	.touch_gesture_available_write = NULL,
-#endif
-	
 };
 int tp_probe_success = 0;	//SW4-HL-TouchPanel-AccordingToTPDriverProbeResultToDecideWhetherToCreateVirtualFileOrNot-00+_20151130
 
@@ -216,49 +208,6 @@ static struct file_operations touch_fwimver_proc_file_ops = {
 };
 //touch_fwimver end
 
-#if 0
-//touch_scover start
-static int fih_touch_scover_read_show(struct seq_file *m, void *v)
-{
-	if (touch_cb.touch_scover_read != NULL)
-	{
-		pr_info("F@Touch Read Touch Scover Result\n");
-		seq_printf(m, "%d\n", touch_cb.touch_scover_read());
-	}
-	return 0;
-}
-
-static int fih_touch_scover_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, fih_touch_scover_read_show, NULL);
-};
-
-static ssize_t fih_touch_scover_proc_write(struct file *file, const char __user *buffer,
-	size_t count, loff_t *ppos)
-{
-	int input;
-	if (sscanf(buffer, "%u", &input) != 1)
-	{
-		 return -EINVAL;
-	}
-	if(touch_cb.touch_scover_write != NULL)
-	{
-		pr_info("F@Touch Write Touch Scover Flag To %d\n",input);
-		touch_cb.touch_scover_write(input);
-	}
-	return count;
-}
-
-static struct file_operations touch_scover_proc_file_ops = {
-	.owner   = THIS_MODULE,
-	.write   = fih_touch_scover_proc_write,
-	.open    = fih_touch_scover_proc_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release
-};
-//touch_scover end
-#endif
 //touch_upgrade start
 static int fih_touch_upgrade_read_show(struct seq_file *m, void *v)
 {
@@ -281,18 +230,38 @@ static int fih_touch_upgrade_proc_open(struct inode *inode, struct file *file)
 static ssize_t fih_touch_upgrade_proc_write(struct file *file, const char __user *buffer,
 	size_t count, loff_t *ppos)
 {
-	int input;
+	char *buf;
+	unsigned int res, input = 0;
 
-	if (sscanf(buffer, "%u", &input) != 1)
-	{
-		 return -EINVAL;
-	}
+	if (touch_cb.touch_fwupgrade == NULL)
+		return -EINVAL;
 
-	if(touch_cb.touch_fwupgrade != NULL)
+	if (count < 1)
+		return -EINVAL;
+
+	buf = kzalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	input = simple_strtoul(buf, NULL, 10);
+
+	if (touch_cb.touch_fwupgrade != NULL)
 	{
-		pr_info("F@Touch Write Touch Upgrade(%d)\n", input);
+		pr_info("F@Touch FW upgrade\n");
 		touch_cb.touch_fwupgrade(input);
 	}
+
+	if (res < 0)
+	{
+		kfree(buf);
+		return res;
+	}
+
+	kfree(buf);
+
+	/* claim that we wrote everything */
 	return count;
 }
 
@@ -332,6 +301,7 @@ static struct file_operations touch_vendor_proc_file_ops = {
 	.release = single_release
 };
 //touch_vendor end
+
 //touch_fwback start
 static int fih_touch_fwback_read_show(struct seq_file *m, void *v)
 {
@@ -388,20 +358,43 @@ static int fih_touch_double_tap_proc_open(struct inode *inode, struct file *file
 static ssize_t fih_touch_double_tap_proc_write(struct file *file, const char __user *buffer,
 	size_t count, loff_t *ppos)
 {
-	unsigned int double_tap;
-	sscanf(buffer, "%u", &double_tap) ;
+	char *buf;
+	unsigned int res, double_tap = 0;
 
-	if((double_tap != 0) &&  (double_tap != 1))
+	if (touch_cb.touch_double_tap_write == NULL)
+		return -EINVAL;
+
+	if (count < 1)
+		return -EINVAL;
+
+	buf = kzalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	double_tap = simple_strtoul(buf, NULL, 10);
+
+	if((double_tap != 0) && (double_tap !=1))
 	{
-		pr_err("F@Touch %s, wrong value\n", __func__);
+		pr_err("F@Touch %s, wrong value, double_tap = %d, *buf = %x\n", __func__, double_tap, *buf);
 		return -EINVAL;
 	}
-	
 	if (touch_cb.touch_double_tap_write != NULL)
 	{
 		pr_info("F@Touch Set double tap\n");
 		touch_cb.touch_double_tap_write(double_tap);
 	}
+
+	if (res < 0)
+	{
+		kfree(buf);
+		return res;
+	}
+
+	kfree(buf);
+
+	/* claim that we wrote everything */
 	return count;
 }
 
@@ -423,23 +416,44 @@ static int fih_touch_prox_status_proc_open(struct inode *inode, struct file *fil
 static ssize_t fih_touch_prox_status_proc_write(struct file *file, const char __user *buffer,
 	size_t count, loff_t *ppos)
 {
-	unsigned int prox_status;
-	sscanf(buffer, "%u", &prox_status) ;
+	unsigned int prox_status = 0;
+	char *buf;
+	unsigned int res;
+	if (touch_cb.touch_prox_status_write == NULL)
+		return -EINVAL;
 
-	if((prox_status != 0) &&  (prox_status != 1))
+	if (count < 1)
+		return -EINVAL;
+
+	buf = kzalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	prox_status = simple_strtoul(buf, NULL, 10);
+	if((prox_status != 0) && (prox_status !=1))
 	{
-		pr_err("F@Touch, prox_status %s, wrong value\n", __func__);
+		pr_err("F@Touch, prox_status %s, wrong value, prox_status = %d\n", __func__, prox_status);
 		return -EINVAL;
 	}
-	
 	if (touch_cb.touch_prox_status_write != NULL)
 	{
 		pr_info("F@Touch Set prox_status\n");
 		touch_cb.touch_prox_status_write(prox_status);
 	}
+
+	if (res < 0)
+	{
+		kfree(buf);
+		return res;
+	}
+
+	kfree(buf);
+
+	/* claim that we wrote everything */
 	return count;
 }
-
 
 static struct file_operations touch_double_tap_proc_file_ops = {
 	.owner   = THIS_MODULE,
@@ -473,19 +487,43 @@ static int fih_touch_alt_rst_proc_open(struct inode *inode, struct file *file)
 static ssize_t fih_touch_alt_rst_proc_write(struct file *file, const char __user *buffer,
        size_t count, loff_t *ppos)
 {
-       int input;
+	unsigned int ALT_Reset = 0;
+	char *buf;
+	unsigned int res;
+	if (touch_cb.touch_alt_rst == NULL)
+		return -EINVAL;
 
-       if (sscanf(buffer, "%u", &input) != 1)
-       {
-               return -EINVAL;
-       }
+	if (count < 1)
+		return -EINVAL;
 
-       if(touch_cb.touch_alt_rst != NULL)
-       {
-              pr_info("F@Touch Write Touch ALT Reset(%d)\n", input);
-              touch_cb.touch_alt_rst();
-       }
-       return count;
+	buf = kzalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	ALT_Reset = simple_strtoul(buf, NULL, 10);
+	if(ALT_Reset !=1)
+	{
+		pr_err("F@Touch %s, wrong value\n", __func__);
+		return -EINVAL;
+	}
+	if (touch_cb.touch_alt_rst != NULL)
+	{
+		pr_info("F@Touch Write Touch ALT Reset(%d)\n", ALT_Reset);
+		touch_cb.touch_alt_rst();
+	}
+
+	if (res < 0)
+	{
+		kfree(buf);
+		return res;
+	}
+
+	kfree(buf);
+
+	/* claim that we wrote everything */
+	return count;
 }
 
 static struct file_operations touch_alt_rst_file_ops = {
@@ -536,20 +574,45 @@ static int fih_touch_alt_st_enable_proc_open(struct inode *inode, struct file *f
 static ssize_t fih_touch_alt_st_enable_proc_write(struct file *file, const char __user *buffer,
        size_t count, loff_t *ppos)
 {
-       int input;
+	unsigned int ALT_st_enable = 0;
+	char *buf;
+	unsigned int res;
+	if (touch_cb.touch_alt_st_enable == NULL)
+		return -EINVAL;
 
-       if (sscanf(buffer, "%u", &input) != 1)
-       {
-               return -EINVAL;
-       }
+	if (count < 1)
+		return -EINVAL;
 
-       if(touch_cb.touch_alt_st_enable != NULL)
-       {
-              pr_info("F@Touch Touch ALT enable(%d)\n", input);
-              touch_cb.touch_alt_st_enable(input);
-       }
-       return count;
+	buf = kzalloc(count, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+	ALT_st_enable = simple_strtoul(buf, NULL, 10);
+	if((ALT_st_enable !=1) || (ALT_st_enable != 0))
+	{
+		pr_err("F@Touch %s, wrong value\n", __func__);
+		return -EINVAL;
+	}
+	if (touch_cb.touch_alt_st_enable != NULL)
+	{
+		pr_info("F@Touch Touch ALT enable(%d)\n", ALT_st_enable);
+		touch_cb.touch_alt_st_enable(ALT_st_enable);
+	}
+
+	if (res < 0)
+	{
+		kfree(buf);
+		return res;
+	}
+
+	kfree(buf);
+
+	/* claim that we wrote everything */
+	return count;
 }
+
 static struct file_operations touch_alt_st_enable_file_ops = {
        .owner   = THIS_MODULE,
        .open    = fih_touch_alt_st_enable_proc_open,
@@ -558,6 +621,7 @@ static struct file_operations touch_alt_st_enable_file_ops = {
        .llseek  = seq_lseek,
        .release = single_release
 };
+
 //SW8-JH-ALT test+]
 static int __init fih_touch_init(void)
 {

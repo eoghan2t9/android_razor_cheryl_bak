@@ -151,6 +151,58 @@ int errorHandler(u8 *event, int size){
 				}
 			break;
 
+			case EVENT_TYPE_LOCKDOWN_ERROR:
+				//res = (ERROR_HANDLER_STOP_PROC|res); 				//stop lockdown code routines in order to retry
+				switch(event[2]){
+					case 0x01:
+						logError(1, "%s errorHandler: Lockdown code alredy written into the IC !\n", tag);
+						break;
+
+					case 0x02:
+						logError(1, "%s errorHandler: Lockdown CRC check fail during a WRITE !\n", tag);
+						break;
+
+					case 0x03:
+						logError(1, "%s errorHandler: Lockdown WRITE command format wrong !\n", tag);
+						break;
+
+					case 0x04:
+						logError(1, "%s errorHandler: Lockdown Memory Corrupted! Please contact ST for support !\n", tag);
+						break;
+
+					case 0x11:
+						logError(1, "%s errorHandler: NO Lockdown code to READ into the IC !\n", tag);
+						break;
+
+					case 0x12:
+						logError(1, "%s errorHandler: Lockdown code data corrupted !\n", tag);
+						break;
+
+					case 0x13:
+						logError(1, "%s errorHandler: Lockdown READ command format wrong !\n", tag);
+						break;
+
+					case 0x21:
+						logError(1, "%s errorHandler: Exceeded maximum number of Lockdown code REWRITE into the IC !\n", tag);
+						break;
+
+					case 0x22:
+						logError(1, "%s errorHandler: Lockdown CRC check fail during a REWRITE !\n", tag);
+						break;
+
+					case 0x23:
+						logError(1, "%s errorHandler: Lockdown REWRITE command format wrong !\n", tag);
+						break;
+
+					case 0x24:
+						logError(1, "%s errorHandler: Lockdown Memory Corrupted! Please contact ST for support !\n", tag);
+						break;
+					default:
+						logError(1, "%s errorHandler: No valid error type for LOCKDOWN ERROR! \n", tag);
+
+				}
+				break;
+
 			default:
 				logError(1, "%s errorHandler: No Action taken! \n", tag);
 			break;

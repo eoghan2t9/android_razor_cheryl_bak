@@ -38,7 +38,6 @@
 #include "ipa_uc_offload_i.h"
 
 #define DRV_NAME "ipa"
-#define NAT_DEV_NAME "ipaNatTable"
 #define IPA_COOKIE 0x57831603
 #define IPA_RT_RULE_COOKIE 0x57831604
 #define IPA_RT_TBL_COOKIE 0x57831605
@@ -97,7 +96,7 @@
 
 #define IPAERR_RL(fmt, args...) \
 	do { \
-		pr_err_ratelimited(DRV_NAME " %s:%d " fmt, __func__,\
+		pr_err_ratelimited_ipa(DRV_NAME " %s:%d " fmt, __func__,\
 		__LINE__, ## args);\
 		if (ipa3_ctx) { \
 			IPA_IPC_LOGGING(ipa3_ctx->logbuf, \
@@ -1045,6 +1044,11 @@ struct ipa_tz_unlock_reg_info {
 	u32 size;
 };
 
+struct ipa_dma_task_info {
+	struct ipa_mem_buffer mem;
+	struct ipahal_imm_cmd_pyld *cmd_pyld;
+};
+
 /**
  * struct ipa3_context - IPA context
  * @class: pointer to the struct class
@@ -1226,6 +1230,8 @@ struct ipa3_context {
 	u32 enable_clock_scaling;
 	u32 curr_ipa_clk_rate;
 	bool q6_proxy_clk_vote_valid;
+	struct mutex q6_proxy_clk_vote_mutex;
+	u32 q6_proxy_clk_vote_cnt;
 	u32 ipa_num_pipes;
 
 	struct ipa3_wlan_comm_memb wc_memb;
@@ -1264,6 +1270,7 @@ struct ipa3_context {
 	struct ipa3_smp2p_info smp2p_info;
 	u32 ipa_tz_unlock_reg_num;
 	struct ipa_tz_unlock_reg_info *ipa_tz_unlock_reg;
+	struct ipa_dma_task_info dma_task_info;
 };
 
 /**
@@ -1634,12 +1641,15 @@ int ipa3_reset_flt(enum ipa_ip_type ip);
  * NAT
  */
 int ipa3_allocate_nat_device(struct ipa_ioc_nat_alloc_mem *mem);
+int ipa3_allocate_nat_table(
+	struct ipa_ioc_nat_ipv6ct_table_alloc *table_alloc);
 
 int ipa3_nat_init_cmd(struct ipa_ioc_v4_nat_init *init);
 
 int ipa3_nat_dma_cmd(struct ipa_ioc_nat_dma_cmd *dma);
 
 int ipa3_nat_del_cmd(struct ipa_ioc_v4_nat_del *del);
+int ipa3_del_nat_table(struct ipa_ioc_nat_ipv6ct_table_del *del);
 
 /*
  * Messaging
@@ -1871,6 +1881,7 @@ void ipa3_dump_buff_internal(void *base, dma_addr_t phy_base, u32 size);
 #else
 #define IPA_DUMP_BUFF(base, phy_base, size)
 #endif
+int ipa3_cfg_clkon_cfg(struct ipahal_reg_clkon_cfg *clkon_cfg);
 int ipa3_init_mem_partition(struct device_node *dev_node);
 int ipa3_controller_static_bind(struct ipa3_controller *controller,
 		enum ipa_hw_type ipa_hw_type);
@@ -2071,4 +2082,6 @@ int ipa3_get_ntn_stats(struct Ipa3HwStatsNTNInfoData_t *stats);
 struct dentry *ipa_debugfs_get_root(void);
 bool ipa3_is_msm_device(void);
 struct device *ipa3_get_pdev(void);
+int ipa3_allocate_dma_task_for_gsi(void);
+void ipa3_free_dma_task_for_gsi(void);
 #endif /* _IPA3_I_H_ */

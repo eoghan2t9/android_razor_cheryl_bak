@@ -28,10 +28,19 @@
 
 #define LOCKDOWN_CODE_SIZE		10		//for FTM4 can not be greater than 13 bytes
 
+#define LOCKDOWN_CODE_MAX_SIZE		63
+#define LOCKDOWN_CODE_WRITE_CHUNK	12
+#define LOCKDOWN_CODE_READ_CHUNK	4
+#define LOCKDOWN_CODE_RETRY		2
+
 int readB2(u16 address, u8* outBuf, int len);
 int readB2U16(u16 address, u8* outBuf, int byteToRead);
 int releaseInformation(void);
 int lockDownInfo(u8* data);
+int calculateCRC8(u8* u8_srcBuff, int size, u8 *crc);
+int writeLockDownInfo(u8 *data, int size);
+int rewriteLockDownInfo(u8 *data, int size);
+int readLockDownInfo(u8 *lockData, int *size);
 char* printHex(char* label, u8* buff, int count);
 int pollForEvent(int * event_to_search, int event_bytes, u8* readData, int time_to_wait);
 int fts_disableInterrupt(void);

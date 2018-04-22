@@ -156,10 +156,17 @@ struct hdmi_edid_ctrl {
 };
 
 static bool hdmi_edid_is_mode_supported(struct hdmi_edid_ctrl *edid_ctrl,
-			struct msm_hdmi_mode_timing_info *timing)
+		struct msm_hdmi_mode_timing_info *timing, u32 out_format)
 {
+	u32 pclk = hdmi_tx_setup_tmds_clk_rate(timing->pixel_freq,
+		out_format, false);
+
 	if (!timing->supported ||
-		timing->pixel_freq > edid_ctrl->init_data.max_pclk_khz)
+		pclk > edid_ctrl->init_data.max_pclk_khz)
+		return false;
+
+	if ((out_format == MDP_Y_CBCR_H2V2) &&
+			!edid_ctrl->init_data.yc420_support)
 		return false;
 
 	return true;
@@ -201,6 +208,7 @@ static int hdmi_edid_reset_parser(struct hdmi_edid_ctrl *edid_ctrl)
 		sizeof(edid_ctrl->spkr_alloc_data_block));
 	edid_ctrl->adb_size = 0;
 	edid_ctrl->sadb_size = 0;
+	edid_ctrl->basic_audio_supp = false;
 
 	hdmi_edid_set_video_resolution(edid_ctrl, edid_ctrl->default_vic, true);
 
@@ -936,7 +944,8 @@ static void hdmi_edid_add_sink_y420_format(struct hdmi_edid_ctrl *edid_ctrl,
 	u32 ret = hdmi_get_supported_mode(&timing,
 				&edid_ctrl->init_data.ds_data,
 				video_format);
-	u32 supported = hdmi_edid_is_mode_supported(edid_ctrl, &timing);
+	u32 supported = hdmi_edid_is_mode_supported(edid_ctrl,
+				&timing, MDP_Y_CBCR_H2V2);
 	struct hdmi_edid_sink_data *sink = &edid_ctrl->sink_data;
 
 	if (video_format >= HDMI_VFRMT_MAX) {
@@ -1704,7 +1713,8 @@ static void hdmi_edid_add_sink_video_format(struct hdmi_edid_ctrl *edid_ctrl,
 	u32 ret = hdmi_get_supported_mode(&timing,
 				&edid_ctrl->init_data.ds_data,
 				video_format);
-	u32 supported = hdmi_edid_is_mode_supported(edid_ctrl, &timing);
+	u32 supported = hdmi_edid_is_mode_supported(edid_ctrl,
+				&timing, MDP_RGBA_8888);
 	struct hdmi_edid_sink_data *sink_data = &edid_ctrl->sink_data;
 	struct disp_mode_info *disp_mode_list = sink_data->disp_mode_list;
 	u32 i = 0;
@@ -2315,6 +2325,13 @@ int hdmi_edid_parser(void *input)
 		DEV_DBG("HDMI DVI mode: %s\n",
 			edid_ctrl->sink_mode ? "no" : "yes");
 		goto bail;
+	}
+
+	/* Find out if CEA extension blocks exceeding max limit */
+	if (num_of_cea_blocks >= MAX_EDID_BLOCKS) {
+		DEV_WARN("%s: HDMI EDID exceeded max CEA blocks limit\n",
+				__func__);
+		num_of_cea_blocks = MAX_EDID_BLOCKS - 1;
 	}
 
 	/* check for valid CEA block */

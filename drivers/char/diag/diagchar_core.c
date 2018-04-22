@@ -22,6 +22,8 @@
 #include <linux/sched.h>
 #include <linux/ratelimit.h>
 #include <linux/timer.h>
+#include <linux/platform_device.h>
+#include <linux/msm_mhi.h>
 #ifdef CONFIG_DIAG_OVER_USB
 #include <linux/usb/usbdiag.h>
 #endif
@@ -702,6 +704,11 @@ static void diag_cmd_invalidate_polling(int change_flag)
 	driver->polling_reg_flag = 0;
 	list_for_each_safe(start, temp, &driver->cmd_reg_list) {
 		item = list_entry(start, struct diag_cmd_reg_t, link);
+		if (&item->entry == NULL) {
+			pr_err("diag: In %s, unable to search command\n",
+			       __func__);
+			return;
+		}
 		polling = diag_cmd_chk_polling(&item->entry);
 		if (polling == DIAG_CMD_POLLING) {
 			driver->polling_reg_flag = 1;
@@ -843,6 +850,12 @@ void diag_cmd_remove_reg_by_pid(int pid)
 	mutex_lock(&driver->cmd_reg_mutex);
 	list_for_each_safe(start, temp, &driver->cmd_reg_list) {
 		item = list_entry(start, struct diag_cmd_reg_t, link);
+		if (&item->entry == NULL) {
+			pr_err("diag: In %s, unable to search command\n",
+			       __func__);
+			mutex_unlock(&driver->cmd_reg_mutex);
+			return;
+		}
 		if (item->pid == pid) {
 			list_del(&item->link);
 			kfree(item);
@@ -861,6 +874,12 @@ void diag_cmd_remove_reg_by_proc(int proc)
 	mutex_lock(&driver->cmd_reg_mutex);
 	list_for_each_safe(start, temp, &driver->cmd_reg_list) {
 		item = list_entry(start, struct diag_cmd_reg_t, link);
+		if (&item->entry == NULL) {
+			pr_err("diag: In %s, unable to search command\n",
+			       __func__);
+			mutex_unlock(&driver->cmd_reg_mutex);
+			return;
+		}
 		if (item->proc == proc) {
 			list_del(&item->link);
 			kfree(item);
@@ -3011,6 +3030,16 @@ static int diag_user_process_apps_data(const char __user *buf, int len,
 	return 0;
 }
 
+static int check_data_ready(int index)
+{
+	int data_type = 0;
+
+	mutex_lock(&driver->diagchar_mutex);
+	data_type = driver->data_ready[index];
+	mutex_unlock(&driver->diagchar_mutex);
+	return data_type;
+}
+
 static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 			  loff_t *ppos)
 {
@@ -3023,9 +3052,11 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	int write_len = 0;
 	struct diag_md_session_t *session_info = NULL;
 
+	mutex_lock(&driver->diagchar_mutex);
 	for (i = 0; i < driver->num_clients; i++)
 		if (driver->client_map[i].pid == current->tgid)
 			index = i;
+	mutex_unlock(&driver->diagchar_mutex);
 
 	if (index == -1) {
 		pr_err("diag: Client PID not found in table");
@@ -3035,7 +3066,7 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 		pr_err("diag: bad address from user side\n");
 		return -EFAULT;
 	}
-	wait_event_interruptible(driver->wait_q, driver->data_ready[index]);
+	wait_event_interruptible(driver->wait_q, (check_data_ready(index)) > 0);
 
 	mutex_lock(&driver->diagchar_mutex);
 
@@ -3176,11 +3207,11 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	}
 
 exit:
-	mutex_unlock(&driver->diagchar_mutex);
 	if (driver->data_ready[index] & DCI_DATA_TYPE) {
-		mutex_lock(&driver->dci_mutex);
-		/* Copy the type of data being passed */
 		data_type = driver->data_ready[index] & DCI_DATA_TYPE;
+		mutex_unlock(&driver->diagchar_mutex);
+		/* Copy the type of data being passed */
+		mutex_lock(&driver->dci_mutex);
 		list_for_each_safe(start, temp, &driver->dci_client_list) {
 			entry = list_entry(start, struct diag_dci_client_tbl,
 									track);
@@ -3212,6 +3243,7 @@ exit:
 		mutex_unlock(&driver->dci_mutex);
 		goto end;
 	}
+	mutex_unlock(&driver->diagchar_mutex);
 end:
 	/*
 	 * Flush any read that is currently pending on DCI data and
@@ -3711,6 +3743,41 @@ static int diagchar_cleanup(void)
 	return 0;
 }
 
+static int diag_mhi_probe(struct platform_device *pdev)
+{
+	int ret;
+
+	if (!mhi_is_device_ready(&pdev->dev, "qcom,mhi"))
+		return -EPROBE_DEFER;
+	driver->pdev = pdev;
+	ret = diag_remote_init();
+	if (ret) {
+		diag_remote_exit();
+		return ret;
+	}
+	ret = diagfwd_bridge_init();
+	if (ret) {
+		diagfwd_bridge_exit();
+		return ret;
+	}
+	pr_debug("diag: mhi device is ready\n");
+	return 0;
+}
+
+static const struct of_device_id diag_mhi_table[] = {
+	{.compatible = "qcom,diag-mhi"},
+	{},
+};
+
+static struct platform_driver diag_mhi_driver = {
+	.probe = diag_mhi_probe,
+	.driver = {
+		.name = "DIAG MHI Platform",
+		.owner = THIS_MODULE,
+		.of_match_table = diag_mhi_table,
+	},
+};
+
 static int __init diagchar_init(void)
 {
 	dev_t dev;
@@ -3800,9 +3867,6 @@ static int __init diagchar_init(void)
 	ret = diag_masks_init();
 	if (ret)
 		goto fail;
-	ret = diag_remote_init();
-	if (ret)
-		goto fail;
 	ret = diag_mux_init();
 	if (ret)
 		goto fail;
@@ -3838,14 +3902,12 @@ static int __init diagchar_init(void)
 	if (error)
 		goto fail;
 
-	#ifdef CONFIG_FIH_9801
+	#if defined(CONFIG_FIH_9801) || defined(CONFIG_FIH_9802)
 	misc_register(&diagtest);
 	#endif
 
 	pr_debug("diagchar initialized now");
-	ret = diagfwd_bridge_init();
-	if (ret)
-		diagfwd_bridge_exit();
+	platform_driver_register(&diag_mhi_driver);
 	return 0;
 
 fail:
@@ -3859,9 +3921,7 @@ fail:
 	diagfwd_cntl_exit();
 	diag_dci_exit();
 	diag_masks_exit();
-	diag_remote_exit();
 	return -1;
-
 }
 
 static void diagchar_exit(void)

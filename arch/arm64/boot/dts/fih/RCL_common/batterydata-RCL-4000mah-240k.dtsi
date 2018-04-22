@@ -14,13 +14,6 @@ qcom,2930572_fih_rcl_4000mah_averaged_masterslave_jun12th2017 {
 	/* Battery Tuning */
 	qcom,fg-jeita-thresholds = <0 15 45 55>;
 	fih,jeita-full-capacity-warm-en;
-	fih,diff-jeita-fn;
-	qcom,jeita-fcc-cool-max-ua = <750000>;
-	qcom,jeita-fcc-comp-cool = <0>;
-	qcom,jeita-fv-comp-cool = <0>;
-	qcom,jeita-fcc-warm-max-ua = <1900000>;
-	qcom,jeita-fcc-comp-warm = <0>;
-	qcom,jeita-fv-comp-warm = <300000>;
 	/* [END] */
 	qcom,fg-profile-data = [
 		 7B 1F 9E 05

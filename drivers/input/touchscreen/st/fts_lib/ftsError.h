@@ -50,6 +50,8 @@
 #define ERROR_GESTURE_REMOVE			(int)0x80001200							//unable to remove custom gesture data
 #define ERROR_FEATURE_ENABLE_DISABLE		(int)0x80001300							//unable to enable/disable a feature mode in the IC
 #define ERROR_NOISE_PARAMETERS			(int)0x80001400							//unable to set/read noise parameter in the IC
+#define ERROR_LOCKDOWN_CODE			(int)0x80001500							//unable to write/rewrite/read lockdown code in the IC
+
 
 //THIRD LEVEL ERROR CODE
 #define ERROR_CH_LEN					(int)0x80010000							//unable to retrieve the force and/or sense length

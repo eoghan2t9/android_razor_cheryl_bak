@@ -946,7 +946,7 @@ int ipa2_get_ep_mapping(enum ipa_client_type client)
 
 void ipa2_set_client(int index, enum ipacm_client_enum client, bool uplink)
 {
-	if (client >= IPACM_CLIENT_MAX || client < IPACM_CLIENT_USB) {
+	if (client > IPACM_CLIENT_MAX || client < IPACM_CLIENT_USB) {
 		IPAERR("Bad client number! client =%d\n", client);
 	} else if (index >= IPA_MAX_NUM_PIPES || index < 0) {
 		IPAERR("Bad pipe index! index =%d\n", index);
@@ -4538,7 +4538,7 @@ int ipa_tag_process(struct ipa_desc desc[],
 	}
 
 	/* IP_PACKET_INIT IC for tag status to be sent to apps */
-	pkt_init = kzalloc(sizeof(*pkt_init), GFP_KERNEL);
+	pkt_init = kzalloc(sizeof(*pkt_init), flag);
 	if (!pkt_init) {
 		IPAERR("failed to allocate memory\n");
 		res = -ENOMEM;
@@ -4557,7 +4557,7 @@ int ipa_tag_process(struct ipa_desc desc[],
 	desc_idx++;
 
 	/* NO-OP IC for ensuring that IPA pipeline is empty */
-	reg_write_nop = kzalloc(sizeof(*reg_write_nop), GFP_KERNEL);
+	reg_write_nop = kzalloc(sizeof(*reg_write_nop), flag);
 	if (!reg_write_nop) {
 		IPAERR("no mem\n");
 		res = -ENOMEM;
@@ -4576,7 +4576,7 @@ int ipa_tag_process(struct ipa_desc desc[],
 	desc_idx++;
 
 	/* status IC */
-	status = kzalloc(sizeof(*status), GFP_KERNEL);
+	status = kzalloc(sizeof(*status), flag);
 	if (!status) {
 		IPAERR("no mem\n");
 		res = -ENOMEM;
@@ -4612,7 +4612,7 @@ int ipa_tag_process(struct ipa_desc desc[],
 	atomic_set(&comp->cnt, 2);
 
 	/* dummy packet to send to IPA. packet payload is a completion object */
-	dummy_skb = alloc_skb(sizeof(comp), GFP_KERNEL);
+	dummy_skb = alloc_skb(sizeof(comp), flag);
 	if (!dummy_skb) {
 		IPAERR("failed to allocate memory\n");
 		res = -ENOMEM;

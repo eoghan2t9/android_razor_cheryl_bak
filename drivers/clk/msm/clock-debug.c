@@ -126,6 +126,13 @@ static int clock_debug_measure_get(void *data, u64 *val)
 DEFINE_SIMPLE_ATTRIBUTE(clock_measure_fops, clock_debug_measure_get,
 			NULL, "%lld\n");
 
+#ifdef CONFIG_FIH_CPU_USAGE
+int cluster_actual_freq_get(void *data, u64 *val)
+{
+	return clock_debug_measure_get(data, val);
+}
+#endif
+
 static int clock_debug_enable_set(void *data, u64 val)
 {
 	struct clk *clock = data;

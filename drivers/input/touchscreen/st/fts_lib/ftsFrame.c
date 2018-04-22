@@ -165,6 +165,13 @@ int getMSFrame(u16 type, MutualSenseFrame *frame, int keep_first_row) {
 			frame->header.sense_node = sense_len;
 			break;
 
+		case ADDR_NORM_MS_KEY:
+		case ADDR_RAW_MS_KEY:
+			frame->header.force_node = 1;
+			frame->header.sense_node = ftsInfo.u8_msKeyLen;
+			frame->node_data_size = ftsInfo.u8_msKeyLen;
+			break;
+
 		default:
 			logError(1,"%s getMSFrame: ERROR % 02X\n", tag, ERROR_OP_NOT_ALLOW);
 			return ERROR_OP_NOT_ALLOW;

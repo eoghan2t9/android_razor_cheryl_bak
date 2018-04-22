@@ -11,7 +11,6 @@ if FINGER_PRINT
 config INPUT_FPC1020
 	bool "FPC 1020 Driver"
 	default n
-	depends on FB
 	help
 	  This is a FPC 1020 chipset Driver.
 

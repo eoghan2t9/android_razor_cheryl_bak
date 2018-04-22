@@ -49,6 +49,9 @@ typedef unsigned int u32;
 #define FTS_CMD_LOCKDOWN_CMD					0xC4
 #define FTS_CMD_NOISE_WRITE					0xC7
 #define FTS_CMD_NOISE_READ					0xC8
+#define FTS_CMD_LOCKDOWN_FILL				0xCA
+#define FTS_CMD_LOCKDOWN_WRITE				0xCB
+#define FTS_CMD_LOCKDOWN_READ				0xCC
 #define FTS_CMD_SAVE_CX_TUNING				0xFC
 
 
@@ -70,12 +73,20 @@ typedef unsigned int u32;
 #define EVENTID_PROXIMITY_ENTER             0x0B
 #define EVENTID_PROXIMITY_LEAVE             0x0C
 #define EVENTID_KEY_STATUS                  0x0E
+#define EVENTID_LOCKDOWN_INFO_READ	    0x1E
 #define EVENTID_NOISE_READ		    0x17
 #define EVENTID_NOISE_WRITE		    0x18
 #define EVENTID_GESTURE                     0x22
 #define EVENTID_FRAME_DATA_READ				0x25
+#ifdef SIDE_TOUCH
+#define EVENTID_EDGE_ENTER_POINTER               0x83
+#define EVENTID_EDGE_LEAVE_POINTER               0x84
+#define EVENTID_EDGE_MOTION_POINTER              0x85
+#define EVENTID_SIDE_TOUCH_DETECT                0x86
+#endif
 #define EVENTID_ECHO				0xEC
-#define EVENTID_LAST                        (EVENTID_FRAME_DATA_READ+1)
+#define EVENTID_LAST                        (EVENTID_SIDE_TOUCH_DETECT+1)
+
 
 //EVENT TYPE
 #define EVENT_TYPE_MS_TUNING_CMPL			0x01
@@ -88,6 +99,8 @@ typedef unsigned int u32;
 #define EVENT_TYPE_WATCHDOG_ERROR			0x01
 #define EVENT_TYPE_CHECKSUM_ERROR			0x03
 #define EVENT_TYPE_LOCKDOWN				0x0A
+#define EVENT_TYPE_LOCKDOWN_WRITE			0x08
+#define EVENT_TYPE_LOCKDOWN_ERROR			0x0B
 
 //CRC type
 #define CRC_CONFIG_SIGNATURE 			0x01
@@ -121,6 +134,7 @@ typedef unsigned int u32;
 #define ADDR_CALIB_PRX_FORCE				0x0026
 #define ADDR_CALIB_PRX_SENSE				0x0028
 #define ADDR_RAW_MS_KEY						0x0032
+#define ADDR_NORM_MS_KEY					0x0036
 #define ADDR_COMP_DATA						0x0050
 #define ADDR_FRAMEBUFFER_DATA				0x8000
 
@@ -145,7 +159,8 @@ typedef unsigned int u32;
 #define FEAT_VR				0x00000010
 #define FEAT_EDGE_REJECTION		0x00000020
 #define FEAT_CORNER_REJECTION		0x00000040
-#define FEAT_EDGE_PALM_REJECTION	0x00000100
+#define FEAT_EDGE_PALM_REJECTION	0x00000080
+#define FEAT_SIDE_TOUCH 	0x00000100
 
 //TOUCH SIZE
 #define STYLUS_SIZE			0x01

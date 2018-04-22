@@ -22,7 +22,7 @@
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
-#define I2C_RETRY			3	//number
+#define I2C_RETRY			3//number of retry
 #define I2C_WAIT_BEFORE_RETRY		2 //ms
 
 int openChannel(struct i2c_client *clt);

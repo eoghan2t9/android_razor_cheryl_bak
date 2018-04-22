@@ -1,5 +1,5 @@
 /* Battery profile*/
-/{
+&vendor {
 	mtp_batterydata: qcom,battery-data {
 		#include "batterydata-MS3-2650mah-100k.dtsi"
 		#include "batterydata-MS3-2650mah-240k.dtsi"
@@ -25,11 +25,12 @@
 	qcom,fv-max-uv = <4400000>;
 	qcom,jeita-fcc-comp = <600000>;
 	qcom,jeita-fv-comp = <300000>;
-	qcom,step-soc-thresholds = <40 50 55 60>;
-	qcom,step-current-deltas = <900000 0 0 0 0>;
-	qcom,thermal-mitigation = <3000000 1200000 900000 300000>;
+	qcom,step-charging-enable;
+	qcom,sw-jeita-enable;
+	//qcom,thermal-mitigation = <3000000 1200000 900000 300000>;
 	qcom,auto-recharge-soc;
 	fih,show-batt-info-en;
+	fih,chg-abnormal-check-en;
 };
 
 /* Unuse GPIOs PMI8998*/
@@ -150,6 +151,14 @@
 			gpio@ce00 {
 				reg = <0xce00 0x100>;
 				qcom,pin-num = <15>;
+				qcom,mode = <0>;
+				qcom,pull = <4>;
+				status = "okay";
+			};
+
+			gpio@d200 {
+				reg = <0xd200 0x100>;
+				qcom,pin-num = <19>;
 				qcom,mode = <0>;
 				qcom,pull = <4>;
 				status = "okay";

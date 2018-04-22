@@ -47,7 +47,7 @@
 #define TIMEOUT_REQU_COMP_DATA			1000			//ms
 
 //CHIP INFO
-#define CHIP_INFO_SIZE					141//bytes to read from framebuffer (exclude the signature and the type because already checked during the reading)
+#define CHIP_INFO_SIZE					161//bytes to read from framebuffer (exclude the signature and the type because already checked during the reading)
 #define EXTERNAL_RELEASE_INFO_SIZE			8//bytes
 
 typedef struct {
@@ -140,8 +140,14 @@ typedef struct {
 	u32 u32_mpPassFlag;		       ///< 81 - Mass production pass flag
 	u32 u32_featEn;                        ///< 85 - Supported features
 	u32 u32_echoEn;				///< 89 - enable of particular features: first bit is Echo Enables
-	u8 u8_errSign;				///< 8D - Signature for error field
-	u16 u16_errOffset;		   	///< 8E - Error Offset
+	u8 u8_sideTchConfigTuneVer;		///< 8D - Side Touch tuning version in config
+	u8 u8_sideTchCxmemTuneVer;		///< 8E - Side Touch tuning version in cxmem
+	u8 u8_sideTchForceLen;			///< 8F - Number of force channel on side touch
+	u8 u8_sideTchSenseLen;			///< 90 - Number of sense channel on side touch
+	u8 u64_sideTchForceEn[8];		///< 91 - Side touch force channel enable
+	u8 u64_sideTchSenseEn[8];		///< 99 - Side touch sense channel enable
+	u8 u8_errSign;				///< A1 - Signature for error field
+	u16 u16_errOffset;		   	///< A2 - Error Offset
 } chipInfo;
 
 int requestCompensationData(u16 type);

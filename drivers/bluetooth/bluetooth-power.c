@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2010, 2013-2016 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2010, 2013-2017 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -163,8 +163,11 @@ static int bt_configure_vreg(struct bt_power_vreg_data *vreg)
 	/* Get the regulator handle for vreg */
 	if (!(vreg->reg)) {
 		rc = bt_vreg_init(vreg);
-		if (rc < 0)
+		if (rc < 0) {
+			printk("BBox; %s LINE=%d name=%s rc=%d\n", __func__, __LINE__, vreg->name, rc);
+			printk("BBox::UEC;14::0;Bluetooth get the regulator %s failed\n", vreg->name);
 			return rc;
+		}
 	}
 	rc = bt_vreg_enable(vreg);
 
@@ -224,18 +227,24 @@ static int bt_configure_gpios(int on)
 		if (rc) {
 			BT_PWR_ERR("unable to request gpio %d (%d)\n",
 					bt_reset_gpio, rc);
+			printk("BBox; %s LINE=%d rc=%d\n", __func__, __LINE__, rc);
+			printk("BBox::UEC;14::0;Bluetooth set reset pin failed\n");
 			return rc;
 		}
 
 		rc = gpio_direction_output(bt_reset_gpio, 0);
 		if (rc) {
 			BT_PWR_ERR("Unable to set direction\n");
+			printk("BBox; %s LINE=%d rc=%d\n", __func__, __LINE__, rc);
+			printk("BBox::UEC;14::0;Bluetooth set reset pin failed\n");
 			return rc;
 		}
 		msleep(50);
 		rc = gpio_direction_output(bt_reset_gpio, 1);
 		if (rc) {
 			BT_PWR_ERR("Unable to set direction\n");
+			printk("BBox; %s LINE=%d rc=%d\n", __func__, __LINE__, rc);
+			printk("BBox::UEC;14::0;Bluetooth set reset pin failed\n");
 			return rc;
 		}
 		msleep(50);
@@ -708,7 +717,7 @@ int bt_register_slimdev(struct device *dev)
 
 static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	int ret, pwr_cntrl = 0;
+	int ret = 0, pwr_cntrl = 0;
 
 	switch (cmd) {
 	case BT_CMD_SLIM_TEST:
@@ -730,6 +739,7 @@ static long bt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		} else {
 			BT_PWR_ERR("BT chip state is already :%d no change d\n"
 				, pwr_state);
+			ret = 0;
 		}
 		break;
 	default:

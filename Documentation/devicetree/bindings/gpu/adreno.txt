@@ -93,6 +93,7 @@ Optional Properties:
 - qcom,chipid:		   If it exists this property is used to replace
 			   the chip identification read from the GPU hardware.
 			   This is used to override faulty hardware readings.
+- qcom,disable-wake-on-touch:   Boolean. Disables the GPU power up on a touch input event.
 - qcom,disable-busy-time-burst:
 				Boolean. Disables the busy time burst to avoid switching
 				of power level for large frames based on the busy time limit.
@@ -149,6 +150,11 @@ Optional Properties:
 				<baseAddr size>
 				baseAddr - base address of the gpu channels in the qdss stm memory region
 				size     - size of the gpu stm region
+
+- qcom,gpu-qtimer:
+				<baseAddr size>
+				baseAddr - base address of the qtimer memory region
+				size     - size of the qtimer region
 
 - qcom,tsens-name:
 				Specify the name of GPU temperature sensor. This name will be used

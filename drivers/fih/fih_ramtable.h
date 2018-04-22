@@ -169,9 +169,21 @@
 #define FIH_MEM_DDR_CDT_ADDR			FIH_MEM_DDR_BASE
 #define FIH_MEM_DDR_CDT_SIZE			FIH_MEM_DDR_SIZE
 
+/* sensor TOF*/
+#define FIH_SENSOR_TOF_BASE				(FIH_MEM_DDR_BASE + FIH_MEM_DDR_SIZE)
+#define FIH_SENSOR_TOF_SIZE				0x00001000
+#define FIH_SENSOR_TOF_MEM_ADDR			FIH_SENSOR_TOF_BASE
+#define FIH_SENSOR_TOF_MEM_SIZE			FIH_SENSOR_TOF_SIZE
+
+/* sensor SSC*/
+#define FIH_SENSOR_SSC_BASE				(FIH_SENSOR_TOF_BASE + FIH_SENSOR_TOF_SIZE)
+#define FIH_SENSOR_SSC_SIZE				0x00008000
+#define FIH_SENSOR_SSC_MEM_ADDR			FIH_SENSOR_SSC_BASE
+#define FIH_SENSOR_SSC_MEM_SIZE			FIH_SENSOR_SSC_SIZE
+
 /* no use 6 */
-#define FIH_NO_USE_6_BASE				(FIH_MEM_DDR_BASE + FIH_MEM_DDR_SIZE)
-#define FIH_NO_USE_6_SIZE				0x0002F000
+#define FIH_NO_USE_6_BASE				(FIH_SENSOR_SSC_BASE + FIH_SENSOR_SSC_SIZE)
+#define FIH_NO_USE_6_SIZE				0x00026000
 
  /* -------------------------------------------------------- 9MB */
 
@@ -220,7 +232,9 @@
  *   0xA0AC_8000 | 0x0000_4000 | sensordata (16KB)
  *   0xA0AC_C000 | 0x0000_4000 | LCM data (16KB)
  *   0xA0AD_0000 | 0x0000_1000 | DDR CDT (4KB)
- *   0xA0AD_1000 | 0x0002_F000 | no use 6 (204KB)
+ *   0xA0AD_1000 | 0x0000_1000 | sensor TOF (4KB)
+ *   0xA0AD_2000 | 0x0000_8000 | sensor SSC (32KB)
+ *   0xA0AD_A000 | 0x0002_6000 | no use 6 (152KB)
  *   -------------------------------------------------------- 9MB
  *   0xA0B0_0000 | 0x0020_0000 | pstore (2MB)
  *   -------------------------------------------------------- 11MB

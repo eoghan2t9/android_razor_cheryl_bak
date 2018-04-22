@@ -1,4 +1,4 @@
-ccflags-y := -Idrivers/staging/android -I$(src)
+ccflags-y := -Idrivers/staging/android
 
 msm_kgsl_core-y = \
 	kgsl.o \

@@ -34,6 +34,7 @@
 #include <soc/qcom/restart.h>
 #include <soc/qcom/watchdog.h>
 #include <soc/qcom/minidump.h>
+
 #ifdef CONFIG_FIH_APR
 #include <fih/fih_rere.h>
 #endif
@@ -50,7 +51,7 @@
 #define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 #define SCM_DLOAD_MINIDUMP		0X20
-
+#define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
 
 static int restart_mode;
 static void *restart_reason;
@@ -176,7 +177,7 @@ static bool get_dload_mode(void)
 	return dload_mode_enabled;
 }
 
-#ifndef CONFIG_FIH_DISABLE_REBOOT_EDL
+#if 0
 static void enable_emergency_dload_mode(void)
 {
 	int ret;
@@ -379,7 +380,7 @@ static void msm_restart_prepare(const char *cmd)
 			if (!ret)
 				__raw_writel(0x6f656d00 | (code & 0xff),
 					     restart_reason);
-#ifndef CONFIG_FIH_DISABLE_REBOOT_EDL
+#if 0
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
 #endif
@@ -497,6 +498,7 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 		msm_trigger_wdog_bite();
 #endif
 
+	scm_disable_sdi();
 	halt_spmi_pmic_arbiter();
 	deassert_ps_hold();
 
@@ -599,7 +601,8 @@ static ssize_t show_dload_mode(struct kobject *kobj, struct attribute *attr,
 				char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "DLOAD dump type: %s\n",
-			(dload_type == SCM_DLOAD_MINIDUMP) ? "mini" : "full");
+		(dload_type == SCM_DLOAD_BOTHDUMPS) ? "both" :
+		((dload_type == SCM_DLOAD_MINIDUMP) ? "mini" : "full"));
 }
 
 static size_t store_dload_mode(struct kobject *kobj, struct attribute *attr,
@@ -613,8 +616,16 @@ static size_t store_dload_mode(struct kobject *kobj, struct attribute *attr,
 			return -ENODEV;
 		}
 		dload_type = SCM_DLOAD_MINIDUMP;
-	} else {
-		pr_err("Invalid value. Use 'full' or 'mini'\n");
+	} else if (sysfs_streq(buf, "both")) {
+		if (!minidump_enabled) {
+			pr_err("Minidump not enabled, setting fulldump only\n");
+			dload_type = SCM_DLOAD_FULLDUMP;
+			return count;
+		}
+		dload_type = SCM_DLOAD_BOTHDUMPS;
+	} else{
+		pr_err("Invalid Dump setup request..\n");
+		pr_err("Supported dumps:'full', 'mini', or 'both'\n");
 		return -EINVAL;
 	}
 

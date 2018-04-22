@@ -876,6 +876,14 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 		}
 		if (led->mpp_cfg->pwm_mode == PWM_MODE) {
 			/*config pwm for brightness scaling*/
+			rc = pwm_change_mode(led->mpp_cfg->pwm_cfg->pwm_dev,
+					PM_PWM_MODE_PWM);
+			if (rc < 0) {
+				dev_err(&led->pdev->dev,
+					"Failed to set PWM mode, rc = %d\n",
+					rc);
+				return rc;
+			}
 			period_us = led->mpp_cfg->pwm_cfg->pwm_period_us;
 			if (period_us > INT_MAX / NSEC_PER_USEC) {
 				duty_us = (period_us * led->cdev.brightness) /
@@ -1214,7 +1222,7 @@ regulator_turn_off:
 
 static int qpnp_flash_set(struct qpnp_led_data *led)
 {
-	int rc, error;
+	int rc = 0, error;
 	int val = led->cdev.brightness;
 
 	if (led->flash_cfg->torch_enable)
@@ -1252,7 +1260,8 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 				}
 			}
 
-			qpnp_led_masked_write(led, FLASH_MAX_CURR(led->base),
+			rc = qpnp_led_masked_write(led,
+				FLASH_MAX_CURR(led->base),
 				FLASH_CURRENT_MASK,
 				TORCH_MAX_LEVEL);
 			if (rc) {
@@ -1262,7 +1271,7 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 				goto error_reg_write;
 			}
 
-			qpnp_led_masked_write(led,
+			rc = qpnp_led_masked_write(led,
 				FLASH_LED_TMR_CTRL(led->base),
 				FLASH_TMR_MASK,
 				FLASH_TMR_WATCHDOG);
@@ -1294,7 +1303,7 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 				goto error_reg_write;
 			}
 
-			qpnp_led_masked_write(led,
+			rc = qpnp_led_masked_write(led,
 				FLASH_WATCHDOG_TMR(led->base),
 				FLASH_WATCHDOG_MASK,
 				led->flash_cfg->duration);
@@ -1342,7 +1351,7 @@ static int qpnp_flash_set(struct qpnp_led_data *led)
 				goto error_flash_set;
 			}
 
-			qpnp_led_masked_write(led,
+			rc = qpnp_led_masked_write(led,
 				FLASH_LED_TMR_CTRL(led->base),
 				FLASH_TMR_MASK,
 				FLASH_TMR_SAFETY);
@@ -1581,6 +1590,14 @@ static int qpnp_kpdbl_set(struct qpnp_led_data *led)
 		}
 
 		if (led->kpdbl_cfg->pwm_cfg->mode == PWM_MODE) {
+			rc = pwm_change_mode(led->kpdbl_cfg->pwm_cfg->pwm_dev,
+					PM_PWM_MODE_PWM);
+			if (rc < 0) {
+				dev_err(&led->pdev->dev,
+					"Failed to set PWM mode, rc = %d\n",
+					rc);
+				return rc;
+			}
 			period_us = led->kpdbl_cfg->pwm_cfg->pwm_period_us;
 			if (period_us > INT_MAX / NSEC_PER_USEC) {
 				duty_us = (period_us * led->cdev.brightness) /

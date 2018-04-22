@@ -741,7 +741,11 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 			mp->vreg_config[i].post_off_sleep = tmp;
 		}
 
-		pr_debug("%s: %s min=%d, max=%d, enable=%d, disable=%d, preonsleep=%d, postonsleep=%d, preoffsleep=%d, postoffsleep=%d\n",
+		mp->vreg_config[i].lp_disable_allowed =
+			of_property_read_bool(supply_node,
+			"qcom,supply-lp-mode-disable-allowed");
+
+		pr_debug("%s: %s min=%d, max=%d, enable=%d, disable=%d, preonsleep=%d, postonsleep=%d, preoffsleep=%d, postoffsleep=%d lp_disable_allowed=%d\n",
 			__func__,
 			mp->vreg_config[i].vreg_name,
 			mp->vreg_config[i].min_voltage,
@@ -751,8 +755,8 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 			mp->vreg_config[i].pre_on_sleep,
 			mp->vreg_config[i].post_on_sleep,
 			mp->vreg_config[i].pre_off_sleep,
-			mp->vreg_config[i].post_off_sleep
-			);
+			mp->vreg_config[i].post_off_sleep,
+			mp->vreg_config[i].lp_disable_allowed);
 		++i;
 	}
 
@@ -1043,7 +1047,7 @@ static int mdss_dsi_cmd_flush(struct file *file, fl_owner_t id)
 	while (len >= sizeof(*dchdr)) {
 		dchdr = (struct dsi_ctrl_hdr *)bp;
 		dchdr->dlen = ntohs(dchdr->dlen);
-		if (dchdr->dlen > len) {
+		if (dchdr->dlen > len || dchdr->dlen < 0) {
 			pr_err("%s: dtsi cmd=%x error, len=%d\n",
 				__func__, dchdr->dtype, dchdr->dlen);
 			kfree(buf);
@@ -2187,7 +2191,7 @@ static int __mdss_dsi_dfps_update_clks(struct mdss_panel_data *pdata,
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_dsi_ctrl_pdata *sctrl_pdata = NULL;
-	struct mdss_panel_info *pinfo, *spinfo;
+	struct mdss_panel_info *pinfo, *spinfo = NULL;
 	int rc = 0;
 
 	if (pdata == NULL) {
@@ -2467,7 +2471,7 @@ static int mdss_dsi_dfps_config(struct mdss_panel_data *pdata, int new_fps)
 				rc = ctrl_pdata->refresh_rate_ctl(pdata, new_fps);
 				if (rc) {
 					pr_err("Failed to send VFP update in cmd mode\n");
-					goto error_dfps;
+					goto end_update;
 				}
 				ctrl_pdata->panel_data.panel_info.current_fps = new_fps;
 			}
@@ -3520,9 +3524,10 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 			hw_vsync_handler, IRQF_TRIGGER_FALLING,
 			"VSYNC_GPIO", ctrl_pdata);
 		if (rc) {
-			pr_err("TE request_irq failed.\n");
+			pr_err("%s: TE request_irq failed for ESD\n", __func__);
 			goto error_shadow_clk_deinit;
 		}
+		te_irq_registered = 1;
 		disable_irq(gpio_to_irq(ctrl_pdata->disp_te_gpio));
 	}
 
@@ -4391,6 +4396,15 @@ static int mdss_dsi_parse_gpio_params(struct platform_device *ctrl_pdev,
 	ctrl_pdata->bklt_en_gpio_invert =
 			of_property_read_bool(ctrl_pdev->dev.of_node,
 				"qcom,platform-bklight-en-gpio-invert");
+
+	ctrl_pdata->avdd_en_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			"qcom,platform-avdd-en-gpio", 0);
+	if (!gpio_is_valid(ctrl_pdata->avdd_en_gpio))
+		pr_info("%s: avdd_en gpio not specified\n", __func__);
+
+	ctrl_pdata->avdd_en_gpio_invert =
+			of_property_read_bool(ctrl_pdev->dev.of_node,
+				"qcom,platform-avdd-en-gpio-invert");
 
 	ctrl_pdata->rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 			 "qcom,platform-reset-gpio", 0);

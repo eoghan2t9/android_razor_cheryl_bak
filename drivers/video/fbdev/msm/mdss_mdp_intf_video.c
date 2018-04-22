@@ -470,7 +470,7 @@ static int mdss_mdp_video_wait_one_frame(struct mdss_mdp_ctl *ctl)
 
 	frame_time = ((1000/frame_rate) + 1);
 
-	udelay(frame_time*1000);
+	mdelay(frame_time);
 
 	return ret;
 }

@@ -1369,16 +1369,18 @@ TRACE_EVENT(core_ctl_set_busy,
 		__field(u32, busy)
 		__field(u32, old_is_busy)
 		__field(u32, is_busy)
+		__field(bool, high_irqload)
 	),
 	TP_fast_assign(
 		__entry->cpu = cpu;
 		__entry->busy = busy;
 		__entry->old_is_busy = old_is_busy;
 		__entry->is_busy = is_busy;
+		__entry->high_irqload = sched_cpu_high_irqload(cpu);
 	),
-	TP_printk("cpu=%u, busy=%u, old_is_busy=%u, new_is_busy=%u",
+	TP_printk("cpu=%u, busy=%u, old_is_busy=%u, new_is_busy=%u high_irqload=%d",
 		  __entry->cpu, __entry->busy, __entry->old_is_busy,
-		  __entry->is_busy)
+		  __entry->is_busy, __entry->high_irqload)
 );
 
 TRACE_EVENT(core_ctl_set_boost,
@@ -1458,14 +1460,21 @@ TRACE_EVENT(sched_contrib_scale_f,
 
 #ifdef CONFIG_SMP
 
+#ifdef CONFIG_SCHED_WALT
+extern unsigned int sysctl_sched_use_walt_cpu_util;
+extern unsigned int sysctl_sched_use_walt_task_util;
+extern unsigned int walt_ravg_window;
+extern unsigned int walt_disabled;
+#endif
+
 /*
  * Tracepoint for accounting sched averages for tasks.
  */
 TRACE_EVENT(sched_load_avg_task,
 
-	TP_PROTO(struct task_struct *tsk, struct sched_avg *avg),
+	TP_PROTO(struct task_struct *tsk, struct sched_avg *avg, void *_ravg),
 
-	TP_ARGS(tsk, avg),
+	TP_ARGS(tsk, avg, _ravg),
 
 	TP_STRUCT__entry(
 		__array( char,	comm,	TASK_COMM_LEN		)
@@ -1473,6 +1482,8 @@ TRACE_EVENT(sched_load_avg_task,
 		__field( int,	cpu				)
 		__field( unsigned long,	load_avg		)
 		__field( unsigned long,	util_avg		)
+		__field( unsigned long,	util_avg_pelt	)
+		__field( unsigned long,	util_avg_walt	)
 		__field( u64,		load_sum		)
 		__field( u32,		util_sum		)
 		__field( u32,		period_contrib		)
@@ -1487,15 +1498,25 @@ TRACE_EVENT(sched_load_avg_task,
 		__entry->load_sum		= avg->load_sum;
 		__entry->util_sum		= avg->util_sum;
 		__entry->period_contrib		= avg->period_contrib;
+		__entry->util_avg_pelt  = avg->util_avg;
+		__entry->util_avg_walt  = 0;
+#ifdef CONFIG_SCHED_WALT
+		__entry->util_avg_walt = (((unsigned long)((struct ravg*)_ravg)->demand) << SCHED_LOAD_SHIFT);
+		do_div(__entry->util_avg_walt, walt_ravg_window);
+		if (!walt_disabled && sysctl_sched_use_walt_task_util)
+			__entry->util_avg = __entry->util_avg_walt;
+#endif
 	),
-
-	TP_printk("comm=%s pid=%d cpu=%d load_avg=%lu util_avg=%lu load_sum=%llu"
+	TP_printk("comm=%s pid=%d cpu=%d load_avg=%lu util_avg=%lu "
+			"util_avg_pelt=%lu util_avg_walt=%lu load_sum=%llu"
 		  " util_sum=%u period_contrib=%u",
 		  __entry->comm,
 		  __entry->pid,
 		  __entry->cpu,
 		  __entry->load_avg,
 		  __entry->util_avg,
+		  __entry->util_avg_pelt,
+		  __entry->util_avg_walt,
 		  (u64)__entry->load_sum,
 		  (u32)__entry->util_sum,
 		  (u32)__entry->period_contrib)
@@ -1514,16 +1535,29 @@ TRACE_EVENT(sched_load_avg_cpu,
 		__field( int,	cpu				)
 		__field( unsigned long,	load_avg		)
 		__field( unsigned long,	util_avg		)
+		__field( unsigned long,	util_avg_pelt	)
+		__field( unsigned long,	util_avg_walt	)
 	),
 
 	TP_fast_assign(
 		__entry->cpu			= cpu;
 		__entry->load_avg		= cfs_rq->avg.load_avg;
 		__entry->util_avg		= cfs_rq->avg.util_avg;
+		__entry->util_avg_pelt	= cfs_rq->avg.util_avg;
+		__entry->util_avg_walt	= 0;
+#ifdef CONFIG_SCHED_WALT
+		__entry->util_avg_walt	=
+				cpu_rq(cpu)->prev_runnable_sum << SCHED_LOAD_SHIFT;
+		do_div(__entry->util_avg_walt, walt_ravg_window);
+		if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
+			__entry->util_avg		= __entry->util_avg_walt;
+#endif
 	),
 
-	TP_printk("cpu=%d load_avg=%lu util_avg=%lu",
-		  __entry->cpu, __entry->load_avg, __entry->util_avg)
+	TP_printk("cpu=%d load_avg=%lu util_avg=%lu "
+			  "util_avg_pelt=%lu util_avg_walt=%lu",
+		  __entry->cpu, __entry->load_avg, __entry->util_avg,
+		  __entry->util_avg_pelt, __entry->util_avg_walt)
 );
 
 /*

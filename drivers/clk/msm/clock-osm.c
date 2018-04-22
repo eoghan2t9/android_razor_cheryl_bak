@@ -397,6 +397,7 @@ struct clk_osm {
 	u32 acd_extint1_cfg;
 	u32 acd_autoxfer_ctl;
 	u32 acd_debugfs_addr;
+	u32 acd_debugfs_addr_size;
 	bool acd_init;
 	bool secure_init;
 	bool red_fsm_en;
@@ -1449,6 +1450,7 @@ static int clk_osm_resources_init(struct platform_device *pdev)
 			return -ENOMEM;
 		}
 		pwrcl_clk.pbases[ACD_BASE] = pbase;
+		pwrcl_clk.acd_debugfs_addr_size = resource_size(res);
 		pwrcl_clk.vbases[ACD_BASE] = vbase;
 		pwrcl_clk.acd_init = true;
 	} else {
@@ -1466,6 +1468,7 @@ static int clk_osm_resources_init(struct platform_device *pdev)
 			return -ENOMEM;
 		}
 		perfcl_clk.pbases[ACD_BASE] = pbase;
+		perfcl_clk.acd_debugfs_addr_size = resource_size(res);
 		perfcl_clk.vbases[ACD_BASE] = vbase;
 		perfcl_clk.acd_init = true;
 	} else {
@@ -1629,8 +1632,8 @@ static int clk_osm_setup_hw_table(struct clk_osm *c)
 {
 	struct osm_entry *entry = c->osm_table;
 	int i;
-	u32 freq_val, volt_val, override_val, spare_val;
-	u32 table_entry_offset, last_spare, last_virtual_corner = 0;
+	u32 freq_val = 0, volt_val = 0, override_val = 0, spare_val = 0;
+	u32 table_entry_offset = 0, last_spare = 0, last_virtual_corner = 0;
 
 	for (i = 0; i < OSM_TABLE_SIZE; i++) {
 		if (i < c->num_entries) {
@@ -2846,7 +2849,7 @@ static ssize_t debugfs_trace_method_get(struct file *file, char __user *buf,
 					size_t count, loff_t *ppos)
 {
 	struct clk_osm *c = file->private_data;
-	int len, rc;
+	int len = 0, rc;
 
 	if (IS_ERR(file) || file == NULL) {
 		pr_err("input error %ld\n", PTR_ERR(file));
@@ -3015,6 +3018,11 @@ static int debugfs_get_debug_reg(void *data, u64 *val)
 {
 	struct clk_osm *c = data;
 
+	if (!c->pbases[ACD_BASE]) {
+		pr_err("ACD base start not defined\n");
+		return -EINVAL;
+	}
+
 	if (c->acd_debugfs_addr >= ACD_MASTER_ONLY_REG_ADDR)
 		*val = readl_relaxed((char *)c->vbases[ACD_BASE] +
 				     c->acd_debugfs_addr);
@@ -3026,6 +3034,11 @@ static int debugfs_get_debug_reg(void *data, u64 *val)
 static int debugfs_set_debug_reg(void *data, u64 val)
 {
 	struct clk_osm *c = data;
+
+	if (!c->pbases[ACD_BASE]) {
+		pr_err("ACD base start not defined\n");
+		return -EINVAL;
+	}
 
 	if (c->acd_debugfs_addr >= ACD_MASTER_ONLY_REG_ADDR)
 		clk_osm_acd_master_write_reg(c, val, c->acd_debugfs_addr);
@@ -3044,7 +3057,13 @@ static int debugfs_get_debug_reg_addr(void *data, u64 *val)
 {
 	struct clk_osm *c = data;
 
+	if (!c->pbases[ACD_BASE]) {
+		pr_err("ACD base start not defined\n");
+		return -EINVAL;
+	}
+
 	*val = c->acd_debugfs_addr;
+
 	return 0;
 }
 
@@ -3052,7 +3071,16 @@ static int debugfs_set_debug_reg_addr(void *data, u64 val)
 {
 	struct clk_osm *c = data;
 
+	if (!c->pbases[ACD_BASE]) {
+		pr_err("ACD base start not defined\n");
+		return -EINVAL;
+	}
+
+	if (val >= c->acd_debugfs_addr_size)
+		return -EINVAL;
+
 	c->acd_debugfs_addr = val;
+
 	return 0;
 }
 DEFINE_SIMPLE_ATTRIBUTE(debugfs_acd_debug_reg_addr_fops,
@@ -3192,6 +3220,24 @@ static int clk_osm_panic_callback(struct notifier_block *nfb,
 
 	return NOTIFY_OK;
 }
+
+#ifdef CONFIG_FIH_CPU_USAGE
+extern int cluster_actual_freq_get(void *data, u64 *val);
+
+void cluster_actual_freq_get_all(u64 *val_pwr, u64 *val_perf)
+{
+	int ret;
+
+	ret = cluster_actual_freq_get((void *)&pwrcl_clk.c, val_pwr);
+	if (ret) {
+		printk("pwrclk ret = %d\n", ret);
+	}
+	ret = cluster_actual_freq_get((void *)&perfcl_clk.c, val_perf);
+	if (ret) {
+		printk("perfclk ret = %d\n", ret);
+	}
+}
+#endif
 
 static unsigned long init_rate = 300000000;
 static unsigned long osm_clk_init_rate = 200000000;

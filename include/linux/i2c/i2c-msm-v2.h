@@ -37,6 +37,7 @@ enum msm_i2_debug_level {
 #define MASK_IS_SET_BOOL(val, mask) (MASK_IS_SET(val, mask) ? 1 : 0)
 #define KHz(freq) (1000 * freq)
 #define I2C_MSM_CLK_FAST_PLUS_FREQ  (1000000)
+#define I2C_MSM_MAX_RETRIES 5
 
 /* QUP Registers */
 enum {
@@ -581,6 +582,8 @@ struct i2c_msm_xfer {
  * @rsrcs    resources from platform data including clocks, gpios, irqs, and
  *           memory regions.
  * @mstr_clk_ctl cached value for programming to mstr_clk_ctl register
+ * @i2c_sts_reg	 status of QUP_I2C_MASTER_STATUS register.
+ * @qup_op_reg	 status of QUP_OPERATIONAL register.
  */
 struct i2c_msm_ctrl {
 	struct device             *dev;
@@ -589,6 +592,8 @@ struct i2c_msm_ctrl {
 	struct i2c_msm_dbgfs       dbgfs;
 	struct i2c_msm_resources   rsrcs;
 	u32                        mstr_clk_ctl;
+	u32			   i2c_sts_reg;
+	u32			   qup_op_reg;
 	enum i2c_msm_power_state   pwr_state;
 };
 

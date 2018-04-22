@@ -1006,6 +1006,9 @@ static void update_curr_rt(struct rq *rq)
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
+	/* Kick cpufreq (see the comment in kernel/sched/sched.h). */
+	cpufreq_update_this_cpu(rq, SCHED_CPUFREQ_RT);
+
 	schedstat_set(curr->se.statistics.exec_max,
 		      max(curr->se.statistics.exec_max, delta_exec));
 
@@ -1470,10 +1473,9 @@ task_may_not_preempt(struct task_struct *task, int cpu)
 			 __IRQ_STAT(cpu, __softirq_pending);
 	struct task_struct *cpu_ksoftirqd = per_cpu(ksoftirqd, cpu);
 
-	return (((softirqs & LONG_SOFTIRQ_MASK) &&
+	return ((softirqs & LONG_SOFTIRQ_MASK) &&
 		(task == cpu_ksoftirqd ||
-		 task_thread_info(task)->preempt_count & SOFTIRQ_MASK)) ||
-		task->flags & PF_LONG_PREEMPT_DISABLE_HINT);
+		 task_thread_info(task)->preempt_count & SOFTIRQ_MASK));
 }
 
 static int
@@ -1821,6 +1823,7 @@ static int find_lowest_rq_hmp(struct task_struct *task)
 	 * the best one based on our affinity and topology.
 	 */
 
+retry:
 	for_each_sched_cluster(cluster) {
 		if (boost_on_big && cluster->capacity != max_possible_capacity)
 			continue;
@@ -1828,6 +1831,15 @@ static int find_lowest_rq_hmp(struct task_struct *task)
 		cpumask_and(&candidate_mask, &cluster->cpus, lowest_mask);
 		cpumask_andnot(&candidate_mask, &candidate_mask,
 			       cpu_isolated_mask);
+		/*
+		 * When placement boost is active, if there is no eligible CPU
+		 * in the highest capacity cluster, we fallback to the other
+		 * clusters. So clear the CPUs of the traversed cluster from
+		 * the lowest_mask.
+		 */
+		if (unlikely(boost_on_big))
+			cpumask_andnot(lowest_mask, lowest_mask,
+				       &cluster->cpus);
 
 		if (cpumask_empty(&candidate_mask))
 			continue;
@@ -1865,6 +1877,11 @@ static int find_lowest_rq_hmp(struct task_struct *task)
 
 		if (restrict_cluster && best_cpu != -1)
 			break;
+	}
+
+	if (unlikely(boost_on_big && best_cpu == -1)) {
+		boost_on_big = 0;
+		goto retry;
 	}
 
 	return best_cpu;
@@ -2461,10 +2478,9 @@ static void switched_to_rt(struct rq *rq, struct task_struct *p)
 #ifdef CONFIG_SMP
 		if (p->nr_cpus_allowed > 1 && rq->rt.overloaded)
 			queue_push_tasks(rq);
-#else
+#endif /* CONFIG_SMP */
 		if (p->prio < rq->curr->prio)
 			resched_curr(rq);
-#endif /* CONFIG_SMP */
 	}
 }
 

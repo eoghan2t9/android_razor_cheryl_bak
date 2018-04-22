@@ -31,6 +31,8 @@ struct wmi_ops {
 			    struct wmi_mgmt_rx_ev_arg *arg);
 	int (*pull_ch_info)(struct ath10k *ar, struct sk_buff *skb,
 			    struct wmi_ch_info_ev_arg *arg);
+	int (*pull_peer_delete_resp)(struct ath10k *ar, struct sk_buff *skb,
+				     struct wmi_peer_delete_resp_ev_arg *arg);
 	int (*pull_vdev_start)(struct ath10k *ar, struct sk_buff *skb,
 			       struct wmi_vdev_start_ev_arg *arg);
 	int (*pull_peer_kick)(struct ath10k *ar, struct sk_buff *skb,
@@ -158,6 +160,10 @@ struct wmi_ops {
 					      u32 num_ac);
 	struct sk_buff *(*gen_sta_keepalive)(struct ath10k *ar,
 					     const struct wmi_sta_keepalive_arg *arg);
+	struct sk_buff *(*gen_set_arp_ns_offload)(struct ath10k *ar,
+						  struct ath10k_vif *arvif);
+	struct sk_buff *(*gen_gtk_offload)(struct ath10k *ar,
+					   struct ath10k_vif *arvif);
 	struct sk_buff *(*gen_wow_enable)(struct ath10k *ar);
 	struct sk_buff *(*gen_wow_add_wakeup_event)(struct ath10k *ar, u32 vdev_id,
 						    enum wmi_wow_wakeup_event event,
@@ -243,6 +249,16 @@ ath10k_wmi_pull_mgmt_rx(struct ath10k *ar, struct sk_buff *skb,
 		return -EOPNOTSUPP;
 
 	return ar->wmi.ops->pull_mgmt_rx(ar, skb, arg);
+}
+
+static inline int
+ath10k_wmi_pull_peer_delete_resp(struct ath10k *ar, struct sk_buff *skb,
+				 struct wmi_peer_delete_resp_ev_arg *arg)
+{
+	if (!ar->wmi.ops->pull_peer_delete_resp)
+		return -EOPNOTSUPP;
+
+	return ar->wmi.ops->pull_peer_delete_resp(ar, skb, arg);
 }
 
 static inline int
@@ -1165,6 +1181,40 @@ ath10k_wmi_sta_keepalive(struct ath10k *ar,
 		return PTR_ERR(skb);
 
 	cmd_id = ar->wmi.cmd->sta_keepalive_cmd;
+	return ath10k_wmi_cmd_send(ar, skb, cmd_id);
+}
+
+static inline int
+ath10k_wmi_set_arp_ns_offload(struct ath10k *ar, struct ath10k_vif *arvif)
+{
+	struct sk_buff *skb;
+	u32 cmd_id;
+
+	if (!ar->wmi.ops->gen_set_arp_ns_offload)
+		return -EOPNOTSUPP;
+
+	skb = ar->wmi.ops->gen_set_arp_ns_offload(ar, arvif);
+	if (IS_ERR(skb))
+		return PTR_ERR(skb);
+
+	cmd_id = ar->wmi.cmd->set_arp_ns_offload_cmdid;
+	return ath10k_wmi_cmd_send(ar, skb, cmd_id);
+}
+
+static inline int
+ath10k_wmi_gtk_offload(struct ath10k *ar, struct ath10k_vif *arvif)
+{
+	struct sk_buff *skb;
+	u32 cmd_id;
+
+	if (!ar->wmi.ops->gen_gtk_offload)
+		return -EOPNOTSUPP;
+
+	skb = ar->wmi.ops->gen_gtk_offload(ar, arvif);
+	if (IS_ERR(skb))
+		return PTR_ERR(skb);
+
+	cmd_id = ar->wmi.cmd->gtk_offload_cmdid;
 	return ath10k_wmi_cmd_send(ar, skb, cmd_id);
 }
 

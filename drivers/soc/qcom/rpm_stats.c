@@ -1,4 +1,5 @@
-/* Copyright (c) 2011-2016, 2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2013 Foxconn International Holdings, Ltd. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -313,7 +314,7 @@ static ssize_t msm_rpmstats_file_read(struct file *file, char __user *bufu,
 			prvdata->len = msm_rpmstats_copy_stats(prvdata);
 		else if (prvdata->platform_data->version == 2)
 			prvdata->len = msm_rpmstats_copy_stats_v2(prvdata);
-		*ppos = 0;
+			*ppos = 0;
 	}
 	ret = simple_read_from_buffer(bufu, count, ppos,
 			prvdata->buf, prvdata->len);
@@ -467,7 +468,7 @@ static ssize_t rpmstats_show(struct kobject *kobj,
 					prvdata);
 	}
 
-	ret = snprintf(buf, prvdata->len, prvdata->buf);
+	ret = snprintf(buf, prvdata->len, "%s", prvdata->buf);
 	iounmap(prvdata->reg_base);
 ioremap_fail:
 	kfree(prvdata);
@@ -529,15 +530,10 @@ static int msm_rpmstats_probe(struct platform_device *pdev)
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 							"phys_addr_base");
-	#ifdef CONFIG_FIH_FEATURE_RPM_STATS_LOG
-	if (!res){
+	if (!res) {
 		kfree(pdata);
 		return -EINVAL;
 	}
-	#else
-	if (!res)
-		return -EINVAL;
-	#endif
 
 	offset = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 							"offset_addr");
@@ -545,8 +541,9 @@ static int msm_rpmstats_probe(struct platform_device *pdev)
 		/* Remap the rpm-stats pointer */
 		phys_ptr = ioremap_nocache(offset->start, SZ_4);
 		if (!phys_ptr) {
-			pr_err("%s: Failed to ioremap address: %x\n",
-					__func__, offset_addr);
+			pr_err("%s: Failed to ioremap address: %pa\n",
+					__func__, &offset->start);
+			kfree(pdata);
 			return -ENODEV;
 		}
 		offset_addr = readl_relaxed(phys_ptr);

@@ -15,7 +15,7 @@
 
 
 
-//#define FTM3_CHIP//Dennis, should be FTM4
+//#define FTM3_CHIP// should be FTM4
 
 
 //DUMMY BYTES DATA

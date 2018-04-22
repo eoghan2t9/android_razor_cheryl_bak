@@ -64,9 +64,12 @@ enum print_reason {
 #define BATT_PROFILE_VOTER		"BATT_PROFILE_VOTER"
 #define OTG_DELAY_VOTER			"OTG_DELAY_VOTER"
 #define USBIN_I_VOTER			"USBIN_I_VOTER"
+#define WEAK_CHARGER_VOTER		"WEAK_CHARGER_VOTER"
 
 #define VCONN_MAX_ATTEMPTS	3
 #define OTG_MAX_ATTEMPTS	3
+#define BOOST_BACK_STORM_COUNT	3
+#define WEAK_CHG_STORM_COUNT	8
 
 enum smb_mode {
 	PARALLEL_MASTER = 0,
@@ -136,8 +139,13 @@ struct smb_irq_info {
 static const unsigned int smblib_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
+	EXTCON_USB_CC,
+	EXTCON_USB_SPEED,
 	EXTCON_NONE,
 };
+
+/* EXTCON_USB and EXTCON_USB_HOST are mutually exclusive */
+static const u32 smblib_extcon_exclusive[] = {0x3, 0};
 
 struct smb_regulator {
 	struct regulator_dev	*rdev;
@@ -190,9 +198,6 @@ struct smb_params {
 	/* WayneWCShiue - 9801-468 - [BAT] Jeita temperature protection */
 	struct smb_chg_param	jeita_fv_comp;
 	/* end 9801-468 */
-	struct smb_chg_param	step_soc_threshold[4];
-	struct smb_chg_param	step_soc;
-	struct smb_chg_param	step_cc_delta[5];
 	struct smb_chg_param	freq_buck;
 	struct smb_chg_param	freq_boost;
 };
@@ -233,6 +238,7 @@ struct smb_charger {
 	struct smb_chg_freq	chg_freq;
 	int			smb_version;
 	int			otg_delay_ms;
+	int			*weak_chg_icl_ua;
 
 	/* locks */
 	struct mutex		lock;
@@ -286,7 +292,6 @@ struct smb_charger {
 	struct work_struct	rdstd_cc2_detach_work;
 	struct delayed_work	hvdcp_detect_work;
 	struct delayed_work	ps_change_timeout_work;
-	struct delayed_work	step_soc_req_work;
 	struct delayed_work	clear_hdc_work;
 	struct work_struct	otg_oc_work;
 	struct work_struct	vconn_oc_work;
@@ -295,6 +300,7 @@ struct smb_charger {
 	struct delayed_work	pl_enable_work;
 	struct work_struct	legacy_detection_work;
 	struct delayed_work	uusb_otg_work;
+	struct delayed_work	bb_removal_work;
 	/* WayneWCShiue - 9801-3293 - Show battery info */
 	struct delayed_work update_batt_info_work;
 	/* end 9801-3293 */
@@ -311,6 +317,7 @@ struct smb_charger {
 	int			dcp_icl_ua;
 	int			fake_capacity;
 	bool			step_chg_enabled;
+	bool			sw_jeita_enabled;
 	bool			is_hdc;
 	bool			chg_done;
 	bool			micro_usb_mode;
@@ -329,12 +336,19 @@ struct smb_charger {
 	int			fake_input_current_limited;
 	bool			pr_swap_in_progress;
 	int			typec_mode;
+	int			usb_icl_change_irq_enabled;
+	u32			jeita_status;
+	u8			float_cfg;
+	bool			use_extcon;
+	bool			otg_present;
 	/* WayneWCShiue - 9801-3293 - Show battery info */
 	bool			show_batt_info_en;
+	bool			fih_chg_abnormal_check_en;
+	u8			fih_reEnable_max_limit;
 	/* end 9801-3293 */
-	/* WayneWCShiue - 9803-1816 - Set charging current to 0.7C, disable step charging */
-	bool			gStep_charge_en;
-	/* end 9803-1816 */
+	/* WayneWCShiue - 9802-799 - Implement the WLC FCC adjust mechansim */
+	bool			fih_wlc_fcc_en;
+	/* end 9802-799 */
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -361,9 +375,6 @@ struct smb_charger {
 	int	jeita_fv_comp_cool;
 	int	jeita_fv_comp_warm;
 	/* end 9801-3730 */
-	int	jeita_fcc_cool_max_ua;
-	int	jeita_fcc_warm_max_ua;
-	int	fcc_max_ua;
 
 	/* WayneWCShiue - 9801-8555 - [BAT] Inform Battery Protect AP once the battery can only charge to 4.1V */
 	int fih_jeita_full_capacity_warm_en;
@@ -405,9 +416,6 @@ int smblib_vconn_regulator_is_enabled(struct regulator_dev *rdev);
 irqreturn_t smblib_handle_debug(int irq, void *data);
 irqreturn_t smblib_handle_otg_overcurrent(int irq, void *data);
 irqreturn_t smblib_handle_chg_state_change(int irq, void *data);
-irqreturn_t smblib_handle_step_chg_state_change(int irq, void *data);
-irqreturn_t smblib_handle_step_chg_soc_update_fail(int irq, void *data);
-irqreturn_t smblib_handle_step_chg_soc_update_request(int irq, void *data);
 irqreturn_t smblib_handle_batt_temp_changed(int irq, void *data);
 irqreturn_t smblib_handle_batt_psy_changed(int irq, void *data);
 irqreturn_t smblib_handle_usb_psy_changed(int irq, void *data);
@@ -445,9 +453,8 @@ int smblib_get_prop_batt_current_now(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_batt_temp(struct smb_charger *chg,
 				union power_supply_propval *val);
-int smblib_get_prop_step_chg_step(struct smb_charger *chg,
+int smblib_get_prop_batt_charge_counter(struct smb_charger *chg,
 				union power_supply_propval *val);
-
 int smblib_set_prop_input_suspend(struct smb_charger *chg,
 				const union power_supply_propval *val);
 int smblib_set_prop_batt_capacity(struct smb_charger *chg,
@@ -472,11 +479,9 @@ int smblib_get_prop_usb_online(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_usb_suspend(struct smb_charger *chg,
 				union power_supply_propval *val);
+int smblib_get_prop_usb_voltage_max(struct smb_charger *chg,
+				union power_supply_propval *val);
 int smblib_get_prop_usb_voltage_now(struct smb_charger *chg,
-				union power_supply_propval *val);
-int smblib_get_prop_pd_current_max(struct smb_charger *chg,
-				union power_supply_propval *val);
-int smblib_get_prop_usb_current_max(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_usb_current_now(struct smb_charger *chg,
 				union power_supply_propval *val);
@@ -484,8 +489,11 @@ int smblib_get_prop_typec_cc_orientation(struct smb_charger *chg,
 				union power_supply_propval *val);
 
 /* WayneWCShiue - 9801-8555 - [BAT] Inform Battery Protect AP once the battery can only charge to 4.1V */
-int  FIH_jeita_full_capacity_get_status(struct smb_charger *chg);
-void FIH_recharge_after_leaving_JEITA_WARM_COOL(struct smb_charger *chg);
+int  FIH_check_chg_status(struct smb_charger *chg);
+void FIH_chg_abnormal_check(struct smb_charger *chg);
+void FIH_chg_reEnable(struct smb_charger *chg);
+void FIH_USBIN_reEnable(struct smb_charger *chg);
+void FIH_soft_JEITA_recharge_check(struct smb_charger *chg);
 /* end 9801-8555 */
 /* WayneWCShiue - 9801-3730 - Change JEITA dynamically */
 void FIH_adjust_JEITA(struct smb_charger *chg);
@@ -513,11 +521,11 @@ int smblib_get_prop_charge_qnovo_enable(struct smb_charger *chg,
 			       union power_supply_propval *val);
 int smblib_set_prop_pd_current_max(struct smb_charger *chg,
 				const union power_supply_propval *val);
-int smblib_set_prop_usb_current_max(struct smb_charger *chg,
+int smblib_set_prop_sdp_current_max(struct smb_charger *chg,
 				const union power_supply_propval *val);
-int smblib_set_prop_usb_voltage_min(struct smb_charger *chg,
+int smblib_set_prop_pd_voltage_max(struct smb_charger *chg,
 				const union power_supply_propval *val);
-int smblib_set_prop_usb_voltage_max(struct smb_charger *chg,
+int smblib_set_prop_pd_voltage_min(struct smb_charger *chg,
 				const union power_supply_propval *val);
 int smblib_set_prop_boost_current(struct smb_charger *chg,
 				const union power_supply_propval *val);
@@ -536,9 +544,10 @@ int smblib_set_prop_charge_qnovo_enable(struct smb_charger *chg,
 void smblib_suspend_on_debug_battery(struct smb_charger *chg);
 int smblib_rerun_apsd_if_required(struct smb_charger *chg);
 int smblib_get_prop_fcc_delta(struct smb_charger *chg,
-			       union power_supply_propval *val);
+				union power_supply_propval *val);
 int smblib_icl_override(struct smb_charger *chg, bool override);
 int smblib_dp_dm(struct smb_charger *chg, int val);
+int smblib_disable_hw_jeita(struct smb_charger *chg, bool disable);
 int smblib_rerun_aicl(struct smb_charger *chg);
 int smblib_set_icl_current(struct smb_charger *chg, int icl_ua);
 int smblib_get_icl_current(struct smb_charger *chg, int *icl_ua);
@@ -552,10 +561,9 @@ int smblib_init(struct smb_charger *chg);
 int smblib_deinit(struct smb_charger *chg);
 
 /* FIH - akckwang - 9801-680 - Dump typec sts register value */
-#if defined(CONFIG_FIH_9801) || defined(CONFIG_FIH_9803)
+#if defined(CONFIG_FIH_9801) || defined(CONFIG_FIH_9802)
 int smblib_dump_typec_sts(struct smb_charger *chg,
 			       union power_supply_propval *val);
 #endif
 /* end FIH - 9801-680 */
-
 #endif /* __SMB2_CHARGER_H */

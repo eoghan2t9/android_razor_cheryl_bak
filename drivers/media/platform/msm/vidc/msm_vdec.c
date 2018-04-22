@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/sort.h>
 #include <linux/slab.h>
 #include <soc/qcom/scm.h>
 #include "msm_vidc_internal.h"
@@ -18,6 +19,7 @@
 #include "vidc_hfi_api.h"
 #include "msm_vidc_debug.h"
 #include "msm_vidc_dcvs.h"
+#include "msm_vdec.h"
 
 #define MSM_VDEC_DVC_NAME "msm_vdec_8974"
 #define MIN_NUM_OUTPUT_BUFFERS 4
@@ -554,6 +556,7 @@ static struct msm_vidc_ctrl msm_vdec_ctrls[] = {
 			(1 << V4L2_MPEG_VIDC_VIDEO_DPB_COLOR_FMT_TP10_UBWC)
 			),
 		.qmenu = mpeg_vidc_video_dpb_color_format,
+		.flags = V4L2_CTRL_FLAG_MODIFY_LAYOUT,
 	},
 	{
 		.id = V4L2_CID_VIDC_QBUF_MODE,
@@ -881,7 +884,7 @@ int msm_vdec_prepare_buf(struct msm_vidc_inst *inst,
 		dprintk(VIDC_ERR,
 			"Core %pK in bad state, ignoring prepare buf\n",
 				inst->core);
-		goto exit;
+		return -EINVAL;
 	}
 
 	switch (b->type) {
@@ -934,7 +937,7 @@ int msm_vdec_prepare_buf(struct msm_vidc_inst *inst,
 		dprintk(VIDC_ERR, "Buffer type not recognized: %d\n", b->type);
 		break;
 	}
-exit:
+
 	return rc;
 }
 
@@ -1508,6 +1511,7 @@ static int msm_vdec_queue_setup(struct vb2_queue *q,
 			rc = -EINVAL;
 			break;
 		}
+		msm_dcvs_try_enable(inst);
 
 		/* Pretend as if FW itself is asking for
 		 * additional buffers.
@@ -1796,6 +1800,7 @@ static int msm_vdec_start_streaming(struct vb2_queue *q, unsigned int count)
 	struct msm_vidc_inst *inst;
 	int rc = 0;
 	struct hfi_device *hdev;
+	struct vb2_buffer *vb;
 	struct vb2_buf_entry *temp, *next;
 	if (!q || !q->drv_priv) {
 		dprintk(VIDC_ERR, "Invalid input, q = %pK\n", q);
@@ -1806,6 +1811,14 @@ static int msm_vdec_start_streaming(struct vb2_queue *q, unsigned int count)
 		dprintk(VIDC_ERR, "%s invalid parameters\n", __func__);
 		return -EINVAL;
 	}
+
+	if (inst->state == MSM_VIDC_CORE_INVALID ||
+		inst->core->state == VIDC_CORE_INVALID ||
+		inst->core->state == VIDC_CORE_UNINIT) {
+		rc = -EINVAL;
+		goto stream_start_failed;
+	}
+
 	hdev = inst->core->device;
 	dprintk(VIDC_DBG, "Streamon called on: %d capability for inst: %pK\n",
 		q->type, inst);
@@ -1820,8 +1833,7 @@ static int msm_vdec_start_streaming(struct vb2_queue *q, unsigned int count)
 		break;
 	default:
 		dprintk(VIDC_ERR, "Queue type is not supported: %d\n", q->type);
-		rc = -EINVAL;
-		goto stream_start_failed;
+		return -EINVAL;
 	}
 	if (rc) {
 		dprintk(VIDC_ERR,
@@ -1840,12 +1852,15 @@ static int msm_vdec_start_streaming(struct vb2_queue *q, unsigned int count)
 
 stream_start_failed:
 	if (rc) {
+		list_for_each_entry(vb, &q->queued_list, queued_entry) {
+			if (vb->type == q->type &&
+					vb->state == VB2_BUF_STATE_ACTIVE)
+				vb2_buffer_done(vb, VB2_BUF_STATE_QUEUED);
+		}
 		mutex_lock(&inst->pendingq.lock);
-		list_for_each_entry_safe(temp, next, &inst->pendingq.list,
-			list) {
+		list_for_each_entry_safe(temp, next,
+				&inst->pendingq.list, list) {
 			if (temp->vb->type == q->type) {
-				vb2_buffer_done(temp->vb,
-					VB2_BUF_STATE_QUEUED);
 				list_del(&temp->list);
 				kfree(temp);
 			}
@@ -1952,6 +1967,8 @@ const struct vb2_ops *msm_vdec_get_vb2q_ops(void)
 int msm_vdec_inst_init(struct msm_vidc_inst *inst)
 {
 	int rc = 0;
+	struct msm_vidc_format *fmt = NULL;
+
 	if (!inst) {
 		dprintk(VIDC_ERR, "Invalid input = %pK\n", inst);
 		return -EINVAL;
@@ -1959,12 +1976,34 @@ int msm_vdec_inst_init(struct msm_vidc_inst *inst)
 	inst->prop.height[CAPTURE_PORT] = DEFAULT_HEIGHT;
 	inst->prop.width[CAPTURE_PORT] = DEFAULT_WIDTH;
 	inst->prop.num_planes[CAPTURE_PORT] = 2;
-	inst->fmts[CAPTURE_PORT] = vdec_formats[0];
+
+	/* By default, initialize CAPTURE port to NV12 format */
+	fmt = msm_comm_get_pixel_fmt_fourcc(vdec_formats,
+		ARRAY_SIZE(vdec_formats), V4L2_PIX_FMT_NV12,
+			CAPTURE_PORT);
+	if (!fmt || fmt->type != CAPTURE_PORT) {
+		dprintk(VIDC_ERR,
+			"vdec_formats corrupted\n");
+		return -EINVAL;
+	}
+	memcpy(&inst->fmts[fmt->type], fmt,
+			sizeof(struct msm_vidc_format));
 
 	inst->prop.height[OUTPUT_PORT] = DEFAULT_HEIGHT;
 	inst->prop.width[OUTPUT_PORT] = DEFAULT_WIDTH;
 	inst->prop.num_planes[OUTPUT_PORT] = 1;
-	inst->fmts[OUTPUT_PORT] = vdec_formats[2];
+
+	/* By default, initialize OUTPUT port to H264 decoder */
+	fmt = msm_comm_get_pixel_fmt_fourcc(vdec_formats,
+			ARRAY_SIZE(vdec_formats), V4L2_PIX_FMT_H264,
+				OUTPUT_PORT);
+	if (!fmt || fmt->type != OUTPUT_PORT) {
+		dprintk(VIDC_ERR,
+			"vdec_formats corrupted\n");
+		return -EINVAL;
+	}
+	memcpy(&inst->fmts[fmt->type], fmt,
+			sizeof(struct msm_vidc_format));
 
 	inst->capability.height.min = MIN_SUPPORTED_HEIGHT;
 	inst->capability.height.max = DEFAULT_HEIGHT;
@@ -2253,6 +2292,7 @@ static int try_set_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 	struct hal_enable_picture enable_picture;
 	struct hal_enable hal_property;
 	enum hal_property property_id = 0;
+	enum hal_video_codec codec;
 	u32 property_val = 0;
 	void *pdata = NULL;
 	struct hfi_device *hdev;
@@ -2307,12 +2347,23 @@ static int try_set_ctrl(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 	case V4L2_CID_MPEG_VIDC_VIDEO_PICTYPE_DEC_MODE:
 		property_id = HAL_PARAM_VDEC_PICTURE_TYPE_DECODE;
 		if (ctrl->val ==
-			V4L2_MPEG_VIDC_VIDEO_PICTYPE_DECODE_ON)
+			V4L2_MPEG_VIDC_VIDEO_PICTYPE_DECODE_ON) {
 			enable_picture.picture_type = HAL_PICTURE_I;
-		else
-			enable_picture.picture_type = HAL_PICTURE_I |
-				HAL_PICTURE_P | HAL_PICTURE_B |
-				HAL_PICTURE_IDR;
+		} else {
+			codec = get_hal_codec(inst->fmts[OUTPUT_PORT].fourcc);
+			if (codec == HAL_VIDEO_CODEC_H264) {
+				enable_picture.picture_type = HAL_PICTURE_I |
+					HAL_PICTURE_P | HAL_PICTURE_B |
+					HAL_PICTURE_IDR;
+			} else if (codec == HAL_VIDEO_CODEC_HEVC) {
+				enable_picture.picture_type = HAL_PICTURE_I |
+					HAL_PICTURE_P | HAL_PICTURE_B |
+					HAL_PICTURE_IDR | HAL_PICTURE_CRA;
+			} else {
+				enable_picture.picture_type = HAL_PICTURE_I |
+					HAL_PICTURE_P | HAL_PICTURE_B;
+			}
+		}
 		pdata = &enable_picture;
 		break;
 	case V4L2_CID_MPEG_VIDC_VIDEO_KEEP_ASPECT_RATIO:
@@ -2616,6 +2667,12 @@ static int try_set_ext_ctrl(struct msm_vidc_inst *inst,
 	int rc = 0, i = 0, fourcc = 0;
 	struct v4l2_ext_control *ext_control;
 	struct v4l2_control control;
+	u32 old_mode = 0;
+	bool mode_changed = false;
+	enum mode {
+		PRIMARY = V4L2_CID_MPEG_VIDC_VIDEO_STREAM_OUTPUT_PRIMARY,
+		SECONDARY = V4L2_CID_MPEG_VIDC_VIDEO_STREAM_OUTPUT_SECONDARY
+	};
 
 	if (!inst || !inst->core || !ctrl) {
 		dprintk(VIDC_ERR,
@@ -2624,19 +2681,21 @@ static int try_set_ext_ctrl(struct msm_vidc_inst *inst,
 	}
 
 	ext_control = ctrl->controls;
-	control.id =
-		V4L2_CID_MPEG_VIDC_VIDEO_STREAM_OUTPUT_MODE;
+	control.id = V4L2_CID_MPEG_VIDC_VIDEO_STREAM_OUTPUT_MODE;
+	old_mode = msm_comm_g_ctrl_for_id(inst, control.id);
 
 	for (i = 0; i < ctrl->count; i++) {
 		switch (ext_control[i].id) {
 		case V4L2_CID_MPEG_VIDC_VIDEO_STREAM_OUTPUT_MODE:
 			control.value = ext_control[i].value;
-
 			rc = msm_comm_s_ctrl(inst, &control);
 			if (rc)
 				dprintk(VIDC_ERR,
 					"%s Failed setting stream output mode : %d\n",
 					__func__, rc);
+
+			if (old_mode == SECONDARY && control.value == PRIMARY)
+				mode_changed = true;
 			break;
 		case V4L2_CID_MPEG_VIDC_VIDEO_DPB_COLOR_FORMAT:
 			switch (ext_control[i].value) {
@@ -2648,6 +2707,24 @@ static int try_set_ext_ctrl(struct msm_vidc_inst *inst,
 						dprintk(VIDC_ERR,
 							"%s Release output buffers failed\n",
 							__func__);
+				}
+				/* Update buffer reqmt for split to comb mode */
+				if (mode_changed) {
+					fourcc =
+						inst->fmts[CAPTURE_PORT].fourcc;
+					msm_comm_set_color_format(inst,
+						HAL_BUFFER_OUTPUT, fourcc);
+					if (rc) {
+						dprintk(VIDC_ERR,
+							"%s Failed setting output color format : %d\n",
+							__func__, rc);
+						break;
+					}
+					rc = msm_comm_try_get_bufreqs(inst);
+					if (rc)
+						dprintk(VIDC_ERR,
+							"%s Failed to get buffer requirements : %d\n",
+							__func__, rc);
 				}
 				break;
 			case V4L2_MPEG_VIDC_VIDEO_DPB_COLOR_FMT_UBWC:
@@ -2793,4 +2870,22 @@ int msm_vdec_ctrl_init(struct msm_vidc_inst *inst)
 {
 	return msm_comm_ctrl_init(inst, msm_vdec_ctrls,
 		ARRAY_SIZE(msm_vdec_ctrls), &msm_vdec_ctrl_ops);
+}
+
+void msm_vdec_g_ctrl(struct msm_vidc_ctrl **ctrls, int *num_ctrls)
+{
+	*ctrls = msm_vdec_ctrls;
+	*num_ctrls = NUM_CTRLS;
+}
+
+static int msm_vdec_ctrl_cmp(const void *st1, const void *st2)
+{
+	return (int32_t)((struct msm_vidc_ctrl *)st1)->id -
+		(int32_t)((struct msm_vidc_ctrl *)st2)->id;
+}
+
+void msm_vdec_ctrl_sort(void)
+{
+	sort(msm_vdec_ctrls, NUM_CTRLS, sizeof(struct msm_vidc_ctrl),
+		msm_vdec_ctrl_cmp, NULL);
 }

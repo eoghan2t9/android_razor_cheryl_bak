@@ -926,6 +926,43 @@ static ssize_t mdss_fb_idle_pc_notify(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "idle power collapsed\n");
 }
 
+static ssize_t mdss_mdp_bl_skip_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = fbi->par;
+	int ret;
+
+	if (mfd == NULL || mfd->panel_info == NULL)
+		return -EINVAL;
+
+	ret = scnprintf(buf, PAGE_SIZE, "%d", mfd->panel_info->bl_skip_enabled);
+
+	return ret;
+}
+
+static ssize_t mdss_mdp_bl_skip_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = fbi->par;
+	int ret, val;
+
+	if (mfd == NULL || mfd->panel_info == NULL)
+		return -EINVAL;
+
+	ret = kstrtoint(buf, 10, &val);
+	if (ret) {
+		pr_err("Invalid value for bl_skip_en\n");
+		return -EINVAL;
+	}
+
+	mfd->panel_info->bl_skip_enabled = (val > 0) ? true : false;
+	sysfs_notify(&dev->kobj, NULL, "bl_skip_en");
+
+	return count;
+}
+
 static ssize_t mdss_fb_get_ie_sre_mode(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1165,6 +1202,8 @@ static DEVICE_ATTR(ie_sre_mode, S_IRUGO | S_IWUSR | S_IWGRP,
 static DEVICE_ATTR(night_mode, S_IRUGO | S_IWUSR | S_IWGRP,
 		mdss_fb_get_night_mode, mdss_fb_set_night_mode);
 static DEVICE_ATTR(mode_switch_event, S_IRUGO, mdss_fb_get_mode_switch_event, NULL);
+static DEVICE_ATTR(bl_skip_en, S_IRUGO | S_IWUSR | S_IWGRP, mdss_mdp_bl_skip_show,
+	mdss_mdp_bl_skip_store);
 
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
@@ -1183,6 +1222,7 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_ie_sre_mode.attr,
 	&dev_attr_night_mode.attr,
 	&dev_attr_mode_switch_event.attr,
+	&dev_attr_bl_skip_en.attr,
 	NULL,
 };
 
@@ -3917,7 +3957,6 @@ static void mdss_fb_var_to_panelinfo(struct fb_var_screeninfo *var,
 		pinfo->lcdc.v_polarity = 0;
 	else
 		pinfo->lcdc.v_polarity = 1;
-
 }
 
 void mdss_panelinfo_to_fb_var(struct mdss_panel_info *pinfo,
@@ -4103,6 +4142,10 @@ skip_commit:
 	if (dynamic_dsi_switch || IS_ERR_VALUE(ret) || !sync_pt_data->flushed) {
 		mdss_fb_release_kickoff(mfd);
 		mdss_fb_signal_timeline(sync_pt_data);
+
+		if ((mfd->panel.type == MIPI_CMD_PANEL) &&
+			(mfd->mdp.signal_retire_fence))
+			mfd->mdp.signal_retire_fence(mfd, 1);
 	}
 
 	ATRACE_END(__func__);
@@ -5008,6 +5051,7 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	struct mdp_destination_scaler_data *ds_data = NULL;
 	struct mdp_destination_scaler_data __user *ds_data_user;
 	struct msm_fb_data_type *mfd;
+	struct mdss_overlay_private *mdp5_data = NULL;
 
 	ret = copy_from_user(&commit, argp, sizeof(struct mdp_layer_commit));
 	if (ret) {
@@ -5019,9 +5063,20 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	if (!mfd)
 		return -EINVAL;
 
+	mdp5_data = mfd_to_mdp5_data(mfd);
+
 	if (mfd->panel_info->panel_dead) {
 		pr_debug("%s: early commit return\n", __func__);
 		MDSS_XLOG(mfd->panel_info->panel_dead);
+		/*
+		 * In case of an ESD attack, since we early return from the
+		 * commits, we need to signal the outstanding fences.
+		 */
+		mdss_fb_release_fences(mfd);
+		if ((mfd->panel.type == MIPI_CMD_PANEL) &&
+			mfd->mdp.signal_retire_fence && mdp5_data)
+			mfd->mdp.signal_retire_fence(mfd,
+						mdp5_data->retire_cnt);
 		return 0;
 	}
 

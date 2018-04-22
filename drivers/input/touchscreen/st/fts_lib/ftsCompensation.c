@@ -678,8 +678,20 @@ int readChipInfo(int doRequest)
     ftsInfo.u32_echoEn = ((data[index + 3] & 0x000000FF) << 24) + ((data[index + 2] & 0x000000FF) << 16) + ((data[index + 1] & 0x000000FF) << 8) + (data[index] & 0x000000FF);
     index += 4;
     logError(1, "%s FEATURES = %08X \n", tag, ftsInfo.u32_echoEn);
-    ftsInfo.u8_errSign=data[index];
-    index += 1;
+	ftsInfo.u8_sideTchConfigTuneVer = data[index++];
+	ftsInfo.u8_sideTchCxmemTuneVer = data[index++];
+	ftsInfo.u8_sideTchForceLen = data[index++];
+	logError(1, "%s Side Touch Force Len = %d \n", tag, ftsInfo.u8_sideTchForceLen);
+	ftsInfo.u8_sideTchSenseLen = data[index++];
+	logError(1, "%s Side Touch Sense Len = %d \n", tag, ftsInfo.u8_sideTchSenseLen);
+	for (i = 0; i < 8; i++) {
+		ftsInfo.u64_sideTchForceEn[i] = data[index++];
+	}
+	for (i = 0; i < 8; i++) {
+		ftsInfo.u64_sideTchSenseEn[i] = data[index++];
+	}
+    ftsInfo.u8_errSign=data[index++];
+
     logError(1, "%s ERROR SIGNATURE = %02X \n", tag, ftsInfo.u8_errSign);
     if(ftsInfo.u8_errSign==ERROR_SIGN_HEAD)
     {

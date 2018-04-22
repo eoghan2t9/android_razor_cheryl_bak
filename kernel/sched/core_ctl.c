@@ -23,6 +23,7 @@
 #include <linux/sched/rt.h>
 
 #include <trace/events/sched.h>
+#include "sched.h"
 
 #define MAX_CPUS_PER_CLUSTER 4
 #define MAX_CLUSTERS 2
@@ -46,6 +47,7 @@ struct cluster_data {
 	bool pending;
 	spinlock_t pending_lock;
 	bool is_big_cluster;
+	bool enable;
 	int nrrun;
 	bool nrrun_changed;
 	struct task_struct *core_ctl_thread;
@@ -67,10 +69,10 @@ struct cpu_data {
 
 static DEFINE_PER_CPU(struct cpu_data, cpu_state);
 static struct cluster_data cluster_state[MAX_CLUSTERS];
-static unsigned int num_clusters;
+static unsigned int num_clusters_c;
 
 #define for_each_cluster(cluster, idx) \
-	for ((cluster) = &cluster_state[idx]; (idx) < num_clusters;\
+	for ((cluster) = &cluster_state[idx]; (idx) < num_clusters_c;\
 		(idx)++, (cluster) = &cluster_state[idx])
 
 static DEFINE_SPINLOCK(state_lock);
@@ -247,6 +249,29 @@ static ssize_t show_is_big_cluster(const struct cluster_data *state, char *buf)
 	return snprintf(buf, PAGE_SIZE, "%u\n", state->is_big_cluster);
 }
 
+static ssize_t store_enable(struct cluster_data *state,
+				const char *buf, size_t count)
+{
+	unsigned int val;
+	bool bval;
+
+	if (sscanf(buf, "%u\n", &val) != 1)
+		return -EINVAL;
+
+	bval = !!val;
+	if (bval != state->enable) {
+		state->enable = bval;
+		apply_need(state);
+	}
+
+	return count;
+}
+
+static ssize_t show_enable(const struct cluster_data *state, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%u\n", state->enable);
+}
+
 static ssize_t show_need_cpus(const struct cluster_data *state, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "%u\n", state->need_cpus);
@@ -375,6 +400,7 @@ core_ctl_attr_ro(need_cpus);
 core_ctl_attr_ro(active_cpus);
 core_ctl_attr_ro(global_state);
 core_ctl_attr_rw(not_preferred);
+core_ctl_attr_rw(enable);
 
 static struct attribute *default_attrs[] = {
 	&min_cpus.attr,
@@ -384,6 +410,7 @@ static struct attribute *default_attrs[] = {
 	&busy_down_thres.attr,
 	&task_thres.attr,
 	&is_big_cluster.attr,
+	&enable.attr,
 	&need_cpus.attr,
 	&active_cpus.attr,
 	&global_state.attr,
@@ -544,13 +571,14 @@ static bool eval_need(struct cluster_data *cluster)
 
 	spin_lock_irqsave(&state_lock, flags);
 
-	if (cluster->boost) {
+	if (cluster->boost || !cluster->enable) {
 		need_cpus = cluster->max_cpus;
 	} else {
 		cluster->active_cpus = get_active_cpu_count(cluster);
 		thres_idx = cluster->active_cpus ? cluster->active_cpus - 1 : 0;
 		list_for_each_entry(c, &cluster->lru, sib) {
-			if (c->busy >= cluster->busy_up_thres[thres_idx])
+			if (c->busy >= cluster->busy_up_thres[thres_idx] ||
+			    sched_cpu_high_irqload(c->cpu))
 				c->is_busy = true;
 			else if (c->busy < cluster->busy_down_thres[thres_idx])
 				c->is_busy = false;
@@ -1027,7 +1055,7 @@ static struct cluster_data *find_cluster_by_first_cpu(unsigned int first_cpu)
 {
 	unsigned int i;
 
-	for (i = 0; i < num_clusters; ++i) {
+	for (i = 0; i < num_clusters_c; ++i) {
 		if (cluster_state[i].first_cpu == first_cpu)
 			return &cluster_state[i];
 	}
@@ -1056,13 +1084,13 @@ static int cluster_init(const struct cpumask *mask)
 
 	pr_info("Creating CPU group %d\n", first_cpu);
 
-	if (num_clusters == MAX_CLUSTERS) {
+	if (num_clusters_c == MAX_CLUSTERS) {
 		pr_err("Unsupported number of clusters. Only %u supported\n",
 								MAX_CLUSTERS);
 		return -EINVAL;
 	}
-	cluster = &cluster_state[num_clusters];
-	++num_clusters;
+	cluster = &cluster_state[num_clusters_c];
+	++num_clusters_c;
 
 	cpumask_copy(&cluster->cpu_mask, mask);
 	cluster->num_cpus = cpumask_weight(mask);
@@ -1077,6 +1105,7 @@ static int cluster_init(const struct cpumask *mask)
 	cluster->offline_delay_ms = 100;
 	cluster->task_thres = UINT_MAX;
 	cluster->nrrun = cluster->num_cpus;
+	cluster->enable = true;
 	INIT_LIST_HEAD(&cluster->lru);
 	spin_lock_init(&cluster->pending_lock);
 

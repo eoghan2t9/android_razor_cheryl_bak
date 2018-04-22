@@ -5667,7 +5667,7 @@ int mdss_mdp_ctl_update_fps(struct mdss_mdp_ctl *ctl)
 
 	ret = ctl->ops.config_fps_fnc(ctl, new_fps);
 	if (!ret)
-		pr_info("%s: fps set to %d\n", __func__, new_fps);
+		pr_debug("%s: fps set to %d\n", __func__, new_fps);
 	else
 		pr_err("%s: Failed to configure %d fps rc=%d\n", __func__,
 			new_fps, ret);

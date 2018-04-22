@@ -53,6 +53,9 @@
 /* Uncomment the line below to test spcom against modem rather than SP */
 /* #define SPCOM_TEST_HLOS_WITH_MODEM 1 */
 
+/* Uncomment the line below to enable debug messages */
+/* #define DEBUG 1 */
+
 #define pr_fmt(fmt)	"spcom [%s]: " fmt, __func__
 
 #include <linux/kernel.h>	/* min() */
@@ -92,8 +95,6 @@
 
 /* SPCOM driver name */
 #define DEVICE_NAME	"spcom"
-
-#define SPCOM_MAX_CHANNELS	0x20
 
 /* maximum ION buffers should be >= SPCOM_MAX_CHANNELS  */
 #define SPCOM_MAX_ION_BUF_PER_CH (SPCOM_MAX_CHANNELS + 4)
@@ -744,8 +745,10 @@ static int spcom_open(struct spcom_channel *ch, unsigned int timeout_msec)
 
 	/* only one client/server may use the channel */
 	if (ch->ref_count) {
-		pr_err("channel [%s] already in use.\n", name);
-		goto exit_err;
+		pr_err("channel [%s] is BUSY, already in use by pid [%d].\n",
+			name, ch->pid);
+		mutex_unlock(&ch->lock);
+		return -EBUSY;
 	}
 
 	pr_debug("ch [%s] opened by PID [%d], count [%d]\n",
@@ -1136,6 +1139,7 @@ struct spcom_client *spcom_register_client(struct spcom_client_info *info)
 	ch = spcom_find_channel_by_name(name);
 	if (!ch) {
 		pr_err("channel %s doesn't exist, load App first.\n", name);
+		kfree(client);
 		return NULL;
 	}
 
@@ -1323,6 +1327,7 @@ struct spcom_server *spcom_register_service(struct spcom_service_info *info)
 	ch = spcom_find_channel_by_name(name);
 	if (!ch) {
 		pr_err("channel %s doesn't exist, load App first.\n", name);
+		kfree(server);
 		return NULL;
 	}
 

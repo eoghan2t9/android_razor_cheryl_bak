@@ -160,3 +160,5 @@ int production_test_ms_key_raw(char *path_limits);
 int save_mp_flag(u32 signature);
 int parseProductionTestLimits(char * path, char *label, int **data, int *row, int *column);
 int readLine(char *data, char *line, int size, int *n);
+int fih_write_switch_antenna(int tp_status);
+

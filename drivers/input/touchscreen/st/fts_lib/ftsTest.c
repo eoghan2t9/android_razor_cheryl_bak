@@ -254,8 +254,40 @@ int fih_checkLimitsMinMax(short *data, int row, int column, int min, int max)
         filp_close(pfile, NULL);
         set_fs(old_fs);
     }
+
     return count; //if count is 0 = OK, test completed successfully
 }
+
+int fih_write_switch_antenna(int tp_status)
+{
+    int ret;
+    struct file *pfile = NULL;
+    mm_segment_t old_fs;
+    char txt_buffer[16] = {0};
+    loff_t pos;
+
+    if (NULL == pfile)
+       pfile = filp_open("/data/misc/radio/tp_side_status", O_CREAT|O_RDWR, 0666);
+    if (IS_ERR(pfile))
+    {
+        ret = (int)PTR_ERR(pfile);
+        pr_err("[ FTS ] error occured while opening file /data/misc/radio/tp_side_status, ret = %d\n", ret);
+    }
+    else
+    {
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        pos = 0;
+        sprintf(txt_buffer, "%d\r\n", tp_status);
+        vfs_write(pfile, txt_buffer, strlen(txt_buffer), &pos);
+    }
+	if(pfile != NULL)
+		filp_close(pfile, NULL);
+    set_fs(old_fs);
+
+    return ret;
+}
+
 int checkLimitsMinMax(short *data, int row, int column, int min, int max)
 {
     int i, j;

@@ -246,6 +246,11 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
 
+	if (ctrl->bklt_dcs_op_mode == DSI_HS_MODE)
+		cmdreq.flags |= CMD_REQ_HS_MODE;
+	else
+		cmdreq.flags |= CMD_REQ_LP_MODE;
+
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
@@ -268,6 +273,15 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			__func__, rc);
 		goto rst_gpio_err;
 	}
+	if (gpio_is_valid(ctrl_pdata->avdd_en_gpio)) {
+		rc = gpio_request(ctrl_pdata->avdd_en_gpio,
+						"avdd_enable");
+		if (rc) {
+			pr_err("request avdd_en gpio failed, rc=%d\n",
+				       rc);
+			goto avdd_en_gpio_err;
+		}
+	}
 	if (gpio_is_valid(ctrl_pdata->lcd_mode_sel_gpio)) {
 		rc = gpio_request(ctrl_pdata->lcd_mode_sel_gpio, "mode_sel");
 		if (rc) {
@@ -280,6 +294,9 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	return rc;
 
 lcd_mode_sel_gpio_err:
+	if (gpio_is_valid(ctrl_pdata->avdd_en_gpio))
+		gpio_free(ctrl_pdata->avdd_en_gpio);
+avdd_en_gpio_err:
 	gpio_free(ctrl_pdata->rst_gpio);
 rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
@@ -444,6 +461,21 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				if (pdata->panel_info.rst_seq[++i])
 					usleep_range(pinfo->rst_seq[i] * 1000, pinfo->rst_seq[i] * 1000);
 			}
+
+			if (gpio_is_valid(ctrl_pdata->avdd_en_gpio)) {
+				if (ctrl_pdata->avdd_en_gpio_invert) {
+					rc = gpio_direction_output(
+						ctrl_pdata->avdd_en_gpio, 0);
+				} else {
+					rc = gpio_direction_output(
+						ctrl_pdata->avdd_en_gpio, 1);
+				}
+				if (rc) {
+					pr_err("%s: unable to set dir for avdd_en gpio\n",
+						__func__);
+					goto exit;
+				}
+			}
 		}
 
 		if (gpio_is_valid(ctrl_pdata->lcd_mode_sel_gpio)) {
@@ -472,6 +504,14 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
+		if (gpio_is_valid(ctrl_pdata->avdd_en_gpio)) {
+			if (ctrl_pdata->avdd_en_gpio_invert)
+				gpio_set_value((ctrl_pdata->avdd_en_gpio), 1);
+			else
+				gpio_set_value((ctrl_pdata->avdd_en_gpio), 0);
+
+			gpio_free(ctrl_pdata->avdd_en_gpio);
+		}
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
@@ -871,6 +911,7 @@ static int mdss_dsi_panel_refresh_rate_ctl(struct mdss_panel_data *pdata, int ra
 	struct refresh_rate_config *cfg;
 	u32 vfp;
 	u32 non_refresh_frames = 0;
+	u32 flags = CMD_REQ_COMMIT | CMD_REQ_MDP_IDLE;
 	int rc = 0;
 	int count = 0;
 
@@ -918,7 +959,7 @@ static int mdss_dsi_panel_refresh_rate_ctl(struct mdss_panel_data *pdata, int ra
 		cfg->config_cmds.cmds[3].payload[1],
 		cfg->config_cmds.cmds[4].payload[1]);
 
-	count = mdss_dsi_panel_cmds_send(ctrl, &cfg->config_cmds, CMD_REQ_COMMIT);
+	count = mdss_dsi_panel_cmds_send(ctrl, &cfg->config_cmds, flags);
 	if (!count) {
 		rc = 1;
 	}
@@ -2366,6 +2407,15 @@ static int mdss_dsi_parse_night_mode(struct device_node *np,
 	struct device_node *profile_entry;
 	int profiles_cnt, rc, i;
 
+	ctrl->night_mode_cfg.enabled = of_property_read_bool(np,
+		"razer,night-mode-enabled");
+	if (!ctrl->night_mode_cfg.enabled) {
+		ctrl->night_mode_cfg.profiles_cmds = NULL;
+		ctrl->night_mode_cfg.profiles_cnt = 0;
+		ctrl->night_mode_cfg.current_profile = -1;
+		return 0;
+	}
+
 	rc = mdss_dsi_parse_dcs_cmds(np, &ctrl->night_mode_cfg.on_cmds,
 			"razer,night-mode-on-commands",
 			"razer,night-mode-on-commands-state");
@@ -2408,7 +2458,6 @@ static int mdss_dsi_parse_night_mode(struct device_node *np,
 	ctrl->night_mode_cfg.profiles_cmds = profiles_cmds;
 	ctrl->night_mode_cfg.profiles_cnt = profiles_cnt;
 	ctrl->night_mode_cfg.current_profile = -1;
-	ctrl->night_mode_cfg.enabled = true;
 	return 0;
 }
 
@@ -2690,6 +2739,13 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 			}
 		} else if (!strcmp(data, "bl_ctrl_dcs")) {
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
+			data = of_get_property(np,
+				"qcom,mdss-dsi-bl-dcs-command-state", NULL);
+			if (data && !strcmp(data, "dsi_hs_mode"))
+				ctrl_pdata->bklt_dcs_op_mode = DSI_HS_MODE;
+			else
+				ctrl_pdata->bklt_dcs_op_mode = DSI_LP_MODE;
+
 			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
 		}

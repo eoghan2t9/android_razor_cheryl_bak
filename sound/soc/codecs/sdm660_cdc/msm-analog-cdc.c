@@ -49,10 +49,10 @@
 #define BUS_DOWN 1
 
 /*
- * 50 Milliseconds sufficient for DSP bring up in the lpass
+ * 200 Milliseconds sufficient for DSP bring up in the lpass
  * after Sub System Restart
  */
-#define ADSP_STATE_READY_TIMEOUT_MS 50
+#define ADSP_STATE_READY_TIMEOUT_MS 200
 
 #define EAR_PMD 0
 #define EAR_PMU 1
@@ -1631,11 +1631,11 @@ static int msm_anlg_cdc_pa_gain_get(struct snd_kcontrol *kcontrol,
 		if (ear_pa_gain == 0x00) {
 			ucontrol->value.integer.value[0] = 3;
 		} else if (ear_pa_gain == 0x01) {
-			ucontrol->value.integer.value[1] = 2;
+			ucontrol->value.integer.value[0] = 2;
 		} else if (ear_pa_gain == 0x02) {
-			ucontrol->value.integer.value[2] = 1;
+			ucontrol->value.integer.value[0] = 1;
 		} else if (ear_pa_gain == 0x03) {
-			ucontrol->value.integer.value[3] = 0;
+			ucontrol->value.integer.value[0] = 0;
 		} else {
 			dev_err(codec->dev,
 				"%s: ERROR: Unsupported Ear Gain = 0x%x\n",
@@ -1657,7 +1657,6 @@ static int msm_anlg_cdc_pa_gain_get(struct snd_kcontrol *kcontrol,
 			return -EINVAL;
 		}
 	}
-	ucontrol->value.integer.value[0] = ear_pa_gain;
 	dev_dbg(codec->dev, "%s: ear_pa_gain = 0x%x\n", __func__, ear_pa_gain);
 	return 0;
 }
@@ -2054,6 +2053,9 @@ static const struct snd_kcontrol_new hph_type_detect_controls[] = {
 static const char * const rdac2_mux_text[] = {
 	"ZERO", "RX2", "RX1"
 };
+
+static const struct snd_kcontrol_new adc1_switch =
+	SOC_DAPM_SINGLE("Switch", SND_SOC_NOPM, 0, 1, 0);
 
 static const struct soc_enum rdac2_mux_enum =
 	SOC_ENUM_SINGLE(MSM89XX_PMIC_DIGITAL_CDC_CONN_HPHR_DAC_CTL,
@@ -2616,6 +2618,17 @@ static int msm_anlg_cdc_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static void set_compander_mode(void *handle, int val)
+{
+	struct sdm660_cdc_priv *handle_cdc = handle;
+	struct snd_soc_codec *codec = handle_cdc->codec;
+
+	if (get_codec_version(handle_cdc) >= DIANGU) {
+		snd_soc_update_bits(codec,
+			MSM89XX_PMIC_ANALOG_RX_COM_BIAS_DAC,
+			0x08, val);
+	};
+}
 static void update_clkdiv(void *handle, int val)
 {
 	struct sdm660_cdc_priv *handle_cdc = handle;
@@ -3105,7 +3118,8 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"ADC2 MUX", "INP2", "ADC2_INP2"},
 	{"ADC2 MUX", "INP3", "ADC2_INP3"},
 
-	{"ADC1", NULL, "AMIC1"},
+	{"ADC1", NULL, "ADC1_INP1"},
+	{"ADC1_INP1", "Switch", "AMIC1"},
 	{"ADC2_INP2", NULL, "AMIC2"},
 	{"ADC2_INP3", NULL, "AMIC3"},
 
@@ -3446,6 +3460,8 @@ static const struct snd_soc_dapm_widget msm_anlg_cdc_dapm_widgets[] = {
 
 	SND_SOC_DAPM_SPK("Ext Spk", msm_anlg_cdc_codec_enable_spk_ext_pa),
 
+	SND_SOC_DAPM_SWITCH("ADC1_INP1", SND_SOC_NOPM, 0, 0,
+			    &adc1_switch),
 	SND_SOC_DAPM_SUPPLY("RX1 CLK", MSM89XX_PMIC_DIGITAL_CDC_DIG_CLK_CTL,
 			    0, 0, NULL, 0),
 	SND_SOC_DAPM_SUPPLY("RX2 CLK", MSM89XX_PMIC_DIGITAL_CDC_DIG_CLK_CTL,
@@ -4643,6 +4659,7 @@ static int msm_anlg_cdc_probe(struct platform_device *pdev)
 	BLOCKING_INIT_NOTIFIER_HEAD(&sdm660_cdc->notifier_mbhc);
 
 	sdm660_cdc->dig_plat_data.handle = (void *) sdm660_cdc;
+	sdm660_cdc->dig_plat_data.set_compander_mode = set_compander_mode;
 	sdm660_cdc->dig_plat_data.update_clkdiv = update_clkdiv;
 	sdm660_cdc->dig_plat_data.get_cdc_version = get_cdc_version;
 	sdm660_cdc->dig_plat_data.register_notifier =

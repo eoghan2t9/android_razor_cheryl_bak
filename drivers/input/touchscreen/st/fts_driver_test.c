@@ -141,10 +141,10 @@ static ssize_t stm_driver_test_show(struct device *dev, struct device_attribute 
     fw.data = NULL;
 
     todoDefault.MutualRaw = 1;
-    todoDefault.MutualRawGap = 1;
+    todoDefault.MutualRawGap = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCx1 = 0;
-    todoDefault.MutualCx2 = 1;
-    todoDefault.MutualCx2Adj = 1;
+    todoDefault.MutualCx2 = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
+    todoDefault.MutualCx2Adj = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCxTotal = 0;
     todoDefault.MutualCxTotalAdj = 0;
 
@@ -158,7 +158,7 @@ static ssize_t stm_driver_test_show(struct device *dev, struct device_attribute 
     todoDefault.SelfForceIx1 = 0;
     todoDefault.SelfForceIx2 = 0;
     todoDefault.SelfForceIx2Adj = 0;
-    todoDefault.SelfForceIxTotal = 1;
+    todoDefault.SelfForceIxTotal = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfForceIxTotalAdj = 0;
     todoDefault.SelfForceCx1 = 0;
     todoDefault.SelfForceCx2 = 0;
@@ -171,7 +171,7 @@ static ssize_t stm_driver_test_show(struct device *dev, struct device_attribute 
     todoDefault.SelfSenseIx1 = 0;
     todoDefault.SelfSenseIx2 = 0;
     todoDefault.SelfSenseIx2Adj = 0;
-    todoDefault.SelfSenseIxTotal = 1;
+    todoDefault.SelfSenseIxTotal = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfSenseIxTotalAdj = 0;
     todoDefault.SelfSenseCx1 = 0;
     todoDefault.SelfSenseCx2 = 0;
@@ -869,7 +869,7 @@ END: //here start the reporting phase, assembling the data to send in the file n
 
 
 //static DEVICE_ATTR(stm_driver_test, (S_IRWXU | S_IRWXG | S_IRWXO), stm_driver_test_show, stm_driver_test_store);
-static DEVICE_ATTR(stm_driver_test, (S_IRUSR | S_IWUSR), stm_driver_test_show, stm_driver_test_store);//Dennis
+static DEVICE_ATTR(stm_driver_test, (S_IRUSR | S_IWUSR), stm_driver_test_show, stm_driver_test_store);
 
 
 static struct attribute *test_cmd_attributes[] = {

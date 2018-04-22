@@ -48,7 +48,9 @@
 static int reset_gpio=GPIO_NOT_DEFINED;
 static int system_resetted_up = 0;
 static int system_resetted_down = 0;
+
 extern chipInfo ftsInfo;
+extern int fts_warm_boot(void);
 
 int readB2(u16 address, u8* outBuf, int len) {
 	int remaining = len;
@@ -239,6 +241,364 @@ int lockDownInfo(u8* data){
 	return OK;
 	
 } 
+
+
+int calculateCRC8(u8* u8_srcBuff, int size, u8 *crc) {
+	u8 u8_remainder; 
+	u8 bit;
+	int i=0;
+	u8_remainder = 0x00;
+	
+	logError(0, "%s %s: Start CRC computing...\n", tag,__func__);
+	if(size!=0 && u8_srcBuff!=NULL){
+		// Perform modulo-2 division, a byte at a time. 
+		for ( i = 0; i < size; i++) {//Bring the next byte into the remainder. 
+			u8_remainder ^= u8_srcBuff[i]; //Perform modulo-2 division, a bit at a time. 		
+			for (bit = 8; bit > 0; --bit) {		//Try to divide the current data bit. 
+				if (u8_remainder & (0x1 << 7)){
+					u8_remainder = (u8_remainder << 1) ^ 0x9B;
+				} else {
+					u8_remainder = (u8_remainder << 1);
+				} 
+			} 
+		} // The final remainder is the CRC result.
+		*crc = u8_remainder;
+		logError(0, "%s %s: CRC value = %02X\n", tag,__func__, *crc);
+		return OK;
+	}else{
+		logError(1, "%s %s: Arguments passed not valid! Data pointer = NULL or size = 0 (%d) ERROR %08X\n", tag,__func__,size, ERROR_OP_NOT_ALLOW);
+		return ERROR_OP_NOT_ALLOW;
+	}
+}
+
+int writeLockDownInfo(u8 *data, int size){
+	int ret,i,toWrite, retry=0, offset =size;
+	u8 cmd[2+LOCKDOWN_CODE_WRITE_CHUNK]={FTS_CMD_LOCKDOWN_FILL, 0x00};
+	u8 crc=0;
+	int event_to_search[2] = {EVENTID_STATUS_UPDATE, EVENT_TYPE_LOCKDOWN_WRITE};
+	u8 readEvent[FIFO_EVENT_SIZE];
+	char *temp =NULL;
+
+
+	logError(0,"%s %s: Writing Lockdown code into the IC ...\n",tag, __func__);
+	
+		ret = fts_disableInterrupt();
+		if (ret < OK) {
+			logError(1, "%s %s: ERROR %08X\n", tag,__func__, ret );
+			ret = (ret | ERROR_LOCKDOWN_CODE);
+			goto ERROR;
+		}		
+		
+		if(size>LOCKDOWN_CODE_MAX_SIZE){
+			logError(1, "%s %s: Lockdown data to write too big! %d>%d  ERROR %08X\n", tag,__func__,size, LOCKDOWN_CODE_MAX_SIZE, ret );
+			ret = (ERROR_OP_NOT_ALLOW | ERROR_LOCKDOWN_CODE);
+			goto ERROR;
+		}
+
+		
+		temp = printHex("Lockdown Code = ",data, size);
+		if(temp!=NULL){
+			logError(0, "%s %s: %s", tag, __func__, temp);
+			kfree(temp);
+		}
+
+		for(retry=0; retry<LOCKDOWN_CODE_RETRY; retry++){
+
+			logError(0,"%s %s: Filling FW buffer ...\n",tag, __func__);
+			i=0;
+			offset = size;
+			cmd[0] = FTS_CMD_LOCKDOWN_FILL;
+			while(offset>0){
+			
+				if(offset>LOCKDOWN_CODE_WRITE_CHUNK){
+					toWrite = LOCKDOWN_CODE_WRITE_CHUNK;				
+				}else{
+					toWrite = offset;
+				}
+			
+				memcpy(&cmd[2], &data[i], toWrite);
+				cmd[1] = i;
+
+				temp = printHex("Commmand = ",cmd,  2+toWrite);
+				if(temp!=NULL){
+					logError(0, "%s %s: %s", tag, __func__, temp);
+					kfree(temp);
+				}
+			
+				ret = fts_writeFwCmd(cmd, 2+toWrite);
+				if (ret < OK) {
+					logError(1, "%s %s: Unable to write Lockdown data at %d iteration.. ERROR %08X\n", tag,__func__,i, ret);
+					ret = (ret | ERROR_LOCKDOWN_CODE);
+					continue;
+				}
+			
+				i+=toWrite; 		//update the offset
+				offset -=toWrite;
+			
+			}
+		
+			logError(0, "%s %s: Compute 8bit CRC...\n", tag, __func__);
+			ret = calculateCRC8(data,size,&crc);
+			if (ret < OK) {
+					logError(1, "%s %s: Unable to compute CRC.. ERROR %08X\n", tag,__func__, ret);
+					ret = (ret | ERROR_LOCKDOWN_CODE);
+					continue;
+			}
+			cmd[0] = FTS_CMD_LOCKDOWN_WRITE;	
+			cmd[1] = 0x00;
+			cmd[2] = (u8)size;
+			cmd[3] = crc;
+		
+			logError(0,"%s %s: Write Lockdown data... \n",tag,__func__);
+			temp = printHex("Commmand = ",cmd,  4);
+				if(temp!=NULL){
+					logError(0, "%s %s: %s", tag, __func__, temp);
+					kfree(temp);
+				}
+			
+			ret = fts_writeFwCmd(cmd, 4);
+			if (ret < OK) {
+				logError(1, "%s %s: Unable to send Lockdown data write command... ERROR %08X\n", tag,__func__, ret);
+				ret = (ret | ERROR_LOCKDOWN_CODE);
+				continue;
+			}
+
+			ret = pollForEvent(event_to_search, 2, &readEvent[0], GENERAL_TIMEOUT); //start the polling for reading the reply
+			if(ret>=OK){
+				if(readEvent[2]!=0x00){
+					logError(1, "%s %s: Event check FAIL! %02X != 0x00 ERROR %08X\n", tag, __func__, readEvent[2], ERROR_LOCKDOWN_CODE);
+					ret= ERROR_LOCKDOWN_CODE;
+					continue;
+				}else{
+					logError(0, "%s %s: Lockdown Code write DONE!\n", tag, __func__);
+					ret = OK;
+				   	break;
+				}
+			}else{
+				logError(1, "%s %s: Can not find lockdown code write reply event! ERROR %08X\n", tag, __func__, ret);
+			}
+		}
+
+ERROR:
+		//ret = fts_enableInterrupt();			//ensure that the interrupt are always renabled when exit from funct
+		if (fts_enableInterrupt() < OK) {
+			logError(1, "%s %s: Error while re-enabling the interrupt!\n", tag, __func__);
+			
+		}
+		return ret;
+
+}
+
+
+int rewriteLockDownInfo(u8 *data, int size){
+	int ret,i,toWrite, retry=0, offset =size;
+	u8 cmd[2+LOCKDOWN_CODE_WRITE_CHUNK]={FTS_CMD_LOCKDOWN_FILL, 0x00};
+	u8 crc=0;
+	int event_to_search[2] = {EVENTID_STATUS_UPDATE, EVENT_TYPE_LOCKDOWN_WRITE};
+	u8 readEvent[FIFO_EVENT_SIZE];
+	char *temp =NULL;
+
+
+	logError(0,"%s %s: ReWriting Lockdown code into the IC start ...\n",tag, __func__);
+	
+		ret = fts_disableInterrupt();
+		if (ret < OK) {
+			logError(1, "%s %s: ERROR %08X\n", tag,__func__, ret );
+			ret = (ret | ERROR_LOCKDOWN_CODE);
+			goto ERROR;
+		}		
+		
+		if(size>LOCKDOWN_CODE_MAX_SIZE){
+			logError(1, "%s %s: Lockdown data to write too big! %d>%d  ERROR %08X\n", tag,__func__,size, LOCKDOWN_CODE_MAX_SIZE, ret );
+			ret = (ERROR_OP_NOT_ALLOW | ERROR_LOCKDOWN_CODE);
+			goto ERROR;
+		}
+
+		
+		temp = printHex("Lockdown Code = ",data, size);
+		if(temp!=NULL){
+			logError(0, "%s %s: %s", tag, __func__, temp);
+			kfree(temp);
+		}
+
+		for(retry=0; retry<LOCKDOWN_CODE_RETRY; retry++){
+
+			logError(0,"%s %s: Filling FW buffer ...\n",tag, __func__);
+			i=0;
+			offset = size;
+			cmd[0] = FTS_CMD_LOCKDOWN_FILL;
+			while(offset>0){
+			
+				if(offset>LOCKDOWN_CODE_WRITE_CHUNK){
+					toWrite = LOCKDOWN_CODE_WRITE_CHUNK;				
+				}else{
+					toWrite = offset;
+				}
+			
+				memcpy(&cmd[2], &data[i], toWrite);
+				cmd[1] = i;
+			
+				temp = printHex("Commmand = ",cmd,  2+toWrite);
+				if(temp!=NULL){
+					logError(0, "%s %s: %s", tag, __func__, temp);
+					kfree(temp);
+				}
+				ret = fts_writeFwCmd(cmd, 2+toWrite);
+				if (ret < OK) {
+					logError(1, "%s %s: Unable to rewrite Lockdown data at %d iteration.. ERROR %08X\n", tag,__func__,i, ret);
+					ret = (ret | ERROR_LOCKDOWN_CODE);
+					continue;
+				}
+			
+				i+=toWrite; 		//update the offset
+				offset -=toWrite;
+			
+			}
+		
+			logError(0, "%s %s: Compute 8bit CRC...\n", tag, __func__);
+			ret = calculateCRC8(data,size,&crc);
+			if (ret < OK) {
+					logError(1, "%s %s: Unable to compute CRC.. ERROR %08X\n", tag,__func__, ret);
+					ret = (ret | ERROR_LOCKDOWN_CODE);
+					continue;
+			}
+			cmd[0] = FTS_CMD_LOCKDOWN_WRITE;	
+			cmd[1] = 0x01;
+			cmd[2] = (u8)size;
+			cmd[3] = crc;
+
+			temp = printHex("Commmand = ",cmd,  4);
+				if(temp!=NULL){
+					logError(0, "%s %s: %s", tag, __func__, temp);
+					kfree(temp);
+				}
+		
+			logError(0,"%s %s: ReWrite Lockdown data... \n",tag,__func__);
+			ret = fts_writeFwCmd(cmd, 4);
+			if (ret < OK) {
+				logError(1, "%s %s: Unable to send Lockdown data rewrite command... ERROR %08X\n", tag,__func__, ret);
+				ret = (ret | ERROR_LOCKDOWN_CODE);
+				continue;
+			}
+
+			ret = pollForEvent(event_to_search, 2, &readEvent[0], GENERAL_TIMEOUT); //start the polling for reading the reply
+			if(ret>=OK){
+				if(readEvent[2]<0x00){
+					logError(1, "%s %s: Event check FAIL! %02X != 0x00 ERROR %08X\n", tag, __func__, readEvent[2], ERROR_LOCKDOWN_CODE);
+					ret= ERROR_LOCKDOWN_CODE;
+					continue;
+				}else{
+					logError(0, "%s %s: Lockdown Code rewrite DONE!\n", tag, __func__);
+					ret = OK;
+				   break;
+				}
+			}else{
+				logError(1, "%s %s: Can not find lockdown code write reply event! ERROR %08X\n", tag, __func__, ret);
+			}
+		}
+
+ERROR:
+		//ret = fts_enableInterrupt();			//ensure that the interrupt are always renabled when exit from funct
+		if (fts_enableInterrupt() < OK) {
+			logError(1, "%s %s: Error while re-enabling the interrupt!\n", tag, __func__);
+			
+		}
+		return ret;
+
+}
+
+int readLockDownInfo(u8 *lockData, int *size){
+	int ret,retry=0, toRead=0, byteToRead;
+	u8 cmd = FTS_CMD_LOCKDOWN_READ;
+	int event_to_search[3] = {EVENTID_LOCKDOWN_INFO_READ,-1,0x00};
+	u8 readEvent[FIFO_EVENT_SIZE];
+	char *temp =NULL;
+	lockData = NULL;
+
+
+	logError(0,"%s %s: Reading Lockdown code from the IC ...\n",tag, __func__);
+	
+		ret = fts_disableInterrupt();
+		if (ret < OK) {
+			logError(1, "%s %s: ERROR %08X\n", tag,__func__, ret );
+			ret = (ret | ERROR_LOCKDOWN_CODE);
+			goto ERROR;
+		}		
+
+		
+		
+
+		for(retry=0; retry<LOCKDOWN_CODE_RETRY; retry++){
+			event_to_search[2] = 0x00;
+			logError(0,"%s %s: Read Lockdown data... (%d attempt) \n",tag,__func__, retry+1);
+			ret = fts_writeFwCmd(&cmd, 1);
+			if (ret < OK) {
+				logError(1, "%s %s: Unable to send Lockdown data write command... ERROR %08X\n", tag,__func__, ret);
+				ret = (ret | ERROR_LOCKDOWN_CODE);
+				continue;
+			}
+	
+			ret = pollForEvent(event_to_search, 3, &readEvent[0], GENERAL_TIMEOUT); //start the polling for reading the reply
+			if(ret>=OK){
+				byteToRead = readEvent[1];
+				*size=byteToRead;
+				logError(0, "%s %s: Lockdown Code size = %d \n", tag,__func__, *size);
+				lockData = (u8*) kmalloc((byteToRead)*sizeof(u8), GFP_KERNEL);
+				if(lockData == NULL){
+					logError(1, "%s %s: Unable to allocate lockData... ERROR %08X\n", tag,__func__, ERROR_ALLOC);
+					ret = (ERROR_ALLOC | ERROR_LOCKDOWN_CODE);
+					continue;
+				}
+				
+				while(byteToRead>0){
+					if((readEvent[1]-readEvent[2])>LOCKDOWN_CODE_READ_CHUNK)
+						toRead = LOCKDOWN_CODE_READ_CHUNK;
+					else
+						toRead = readEvent[1]-readEvent[2];
+					byteToRead-=toRead;
+					memcpy(&lockData[readEvent[2]],&readEvent[3],toRead);
+					event_to_search[2] += toRead;
+					if(byteToRead>0){
+						ret = pollForEvent(event_to_search, 3, &readEvent[0], GENERAL_TIMEOUT); //start the polling for reading the reply
+						if(ret<OK){
+							logError(1, "%s %s: Can not find lockdown code read reply event with offset %02X ! ERROR %08X\n", tag, __func__, event_to_search[2], ret);
+							ret = (ERROR_ALLOC | ERROR_LOCKDOWN_CODE);
+							break;	
+						}
+					}						
+					
+
+				}
+				if(byteToRead!=0){
+					logError(1, "%s %s: Read Lockdown code FAIL! ERROR %08X\n", tag, __func__, ret);
+					continue;
+				}else{
+					logError(0, "%s %s: Lockdown Code read DONE!\n", tag, __func__);
+					ret = OK;
+					temp = printHex("Lockdown Code = ", lockData, *size);
+					if(temp!=NULL){
+						logError(0, "%s %s: %s", tag, __func__, temp);
+						kfree(temp);
+					}
+				   	break;
+				}
+			}else{
+				logError(1, "%s %s: Can not find first lockdown code read reply event! ERROR %08X\n", tag, __func__, ret);
+			}
+		}
+	
+
+ERROR:
+		//ret = fts_enableInterrupt();			//ensure that the interrupt are always renabled when exit from funct
+		if (fts_enableInterrupt() < OK) {
+			logError(1, "%s %s: Error while re-enabling the interrupt!\n", tag, __func__);
+			
+		}
+		return ret;
+
+}
+
+ 
 
 
 char* printHex(char* label, u8* buff, int count) {
@@ -481,6 +841,9 @@ int fts_system_reset() {
 	for (i=0; i<SYSTEM_RESET_RETRY && res<0; i++){
 		
 		if(reset_gpio==GPIO_NOT_DEFINED){
+#ifndef FTM3_CHIP
+			res |= fts_warm_boot();
+#endif  
 			res = fts_writeCmd(cmd, 4);
 		}else{
 			gpio_set_value(reset_gpio, 0);

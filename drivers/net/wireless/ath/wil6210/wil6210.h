@@ -59,7 +59,8 @@ static inline u32 WIL_GET_BITS(u32 x, int b0, int b1)
 	return (x >> b0) & ((1 << (b1 - b0 + 1)) - 1);
 }
 
-#define WIL6210_MEM_SIZE (2*1024*1024UL)
+#define WIL6210_MIN_MEM_SIZE (2 * 1024 * 1024UL)
+#define WIL6210_MAX_MEM_SIZE (4 * 1024 * 1024UL)
 
 #define WIL_TX_Q_LEN_DEFAULT		(4000)
 #define WIL_RX_RING_SIZE_ORDER_DEFAULT	(10)
@@ -620,6 +621,7 @@ extern u8 led_polarity;
 
 struct wil6210_priv {
 	struct pci_dev *pdev;
+	u32 bar_size;
 	struct wireless_dev *wdev;
 	void __iomem *csr;
 	DECLARE_BITMAP(status, wil_status_last);
@@ -859,10 +861,12 @@ int wil_up(struct wil6210_priv *wil);
 int __wil_up(struct wil6210_priv *wil);
 int wil_down(struct wil6210_priv *wil);
 int __wil_down(struct wil6210_priv *wil);
+void wil_refresh_fw_capabilities(struct wil6210_priv *wil);
 void wil_mbox_ring_le2cpus(struct wil6210_mbox_ring *r);
 int wil_find_cid(struct wil6210_priv *wil, const u8 *mac);
 void wil_set_ethtoolops(struct net_device *ndev);
 
+void __iomem *wmi_buffer_block(struct wil6210_priv *wil, __le32 ptr, u32 size);
 void __iomem *wmi_buffer(struct wil6210_priv *wil, __le32 ptr);
 void __iomem *wmi_addr(struct wil6210_priv *wil, u32 ptr);
 int wmi_read_hdr(struct wil6210_priv *wil, __le32 ptr,

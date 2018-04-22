@@ -53,6 +53,8 @@
 #define BBOX_RTC_SET_TIME_FAIL do {printk("BBox;%s: Set Time/Alarm fail\n", __func__); printk("BBox::UEC;18::1\n");} while (0);
 #define BBOX_RTC_PROBE_FAIL do {printk("BBox;%s: Probe fail\n", __func__); printk("BBox::UEC;18::2\n");} while (0);
 #define BBOX_RTC_ENABLE_FAIL do {printk("BBox;%s: Enable fail\n", __func__); printk("BBox::UEC;18::3\n");} while (0);
+#define RTC_READ_ERROR(rc)              do {printk("BBox;%s: read error:%d\n", __func__, rc); printk("BBox::UEC;18::4\n");} while (0)
+#define RTC_WRITE_ERROR(rc)             do {printk("BBox;%s: write error:%d\n", __func__, rc); printk("BBox::UEC;18::5\n");} while (0)
 /* Module parameter to control power-on-alarm */
 bool poweron_alarm;
 EXPORT_SYMBOL(poweron_alarm);
@@ -83,6 +85,7 @@ static int qpnp_read_wrapper(struct qpnp_rtc *rtc_dd, u8 *rtc_val,
 	rc = regmap_bulk_read(rtc_dd->regmap, base, rtc_val, count);
 	if (rc) {
 		dev_err(rtc_dd->rtc_dev, "SPMI read failed\n");
+		RTC_READ_ERROR(rc);
 		return rc;
 	}
 	return 0;
@@ -96,6 +99,7 @@ static int qpnp_write_wrapper(struct qpnp_rtc *rtc_dd, u8 *rtc_val,
 	rc = regmap_bulk_write(rtc_dd->regmap, base, rtc_val, count);
 	if (rc) {
 		dev_err(rtc_dd->rtc_dev, "SPMI write failed\n");
+		RTC_WRITE_ERROR(rc);
 		return rc;
 	}
 

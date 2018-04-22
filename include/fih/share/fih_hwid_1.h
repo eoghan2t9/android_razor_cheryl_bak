@@ -3,7 +3,7 @@
 
 struct st_hwid_table {
 	/* mpp */
-	char r1; /* pin: PROJECT-ID */
+	unsigned int r1; /* pin: PROJECT-ID */
 	char r2; /* pin: HW_REV-ID */
 	char r3; /* pin: RF_BAND-ID */
 	/* info */

@@ -58,8 +58,93 @@ unsigned int debug_cpu_usage_enable = 0;
 
 #define CPU_USAGE_CHECK_INTERVAL_MS 2000  /* 2000ms */ 
 
+unsigned int debug_cpu_usage_interval = CPU_USAGE_CHECK_INTERVAL_MS;
+
 long LastCpuUsage[CPU_NUMS]  = {0};
 long LastIowaitUsage[CPU_NUMS]  = {0};
+
+#include <linux/workqueue.h>
+struct delayed_work		update_tz_info_work;
+static int need_init_tz_info_work = 1;
+
+#define TZ_INFO_INTERVAL_MS	10000 /* 10s */
+
+#define ARM_TZ_INFO_WORK_CNT (TZ_INFO_INTERVAL_MS/CPU_USAGE_CHECK_INTERVAL_MS)
+
+typedef struct 
+{ 
+  char *alias; 
+  char *type; 
+  int divide; 
+} __SENSOR_NAME__; 
+
+#if defined(CONFIG_FIH_9801) || defined(CONFIG_FIH_9802)
+    __SENSOR_NAME__ fih_therm_sensor_list[] = 
+            { {"CPU0", "tsens_tz_sensor1", 10},
+              {"CPU1", "tsens_tz_sensor2", 10},
+              {"CPU2", "tsens_tz_sensor3", 10},
+              {"CPU3", "tsens_tz_sensor4", 10},
+              {"CPU4", "tsens_tz_sensor7", 10},
+              {"CPU5", "tsens_tz_sensor8", 10},
+              {"CPU6", "tsens_tz_sensor9", 10},
+              {"CPU7", "tsens_tz_sensor10", 10},
+              {"GPU", "tsens_tz_sensor12", 10},
+              {"DSP", "tsens_tz_sensor15", 10},
+              {"WLAN", "tsens_tz_sensor16", 10},
+              {"CAMERA", "tsens_tz_sensor18", 10},
+              {"VIDEO", "tsens_tz_sensor19", 10},
+              {"MODEM", "tsens_tz_sensor20", 10},
+              {"QUIET", "quiet_therm", 1},
+              {"BAT", "battery", 1000},
+              {"PM8998", "pm8998_tz", 1000},
+              {"PMI8998", "pmi8998_tz", 1000},
+              {"PM8005", "pm8005_tz", 1000},
+              {"XO", "xo_therm", 1},
+#if defined(CONFIG_FIH_9801)
+              {"PA0", "pa_therm0", 1},
+              {"PA1", "pa_therm1", 1}, 
+#endif
+            };
+#else
+    __SENSOR_NAME__ fih_therm_sensor_list[] = 
+            { {"QUIET", "quiet_therm", 1},
+              {"BAT", "battery", 1000},
+              {"XO", "xo_therm", 1},
+              {"PA0", "pa_therm0", 1},
+              {"PA1", "pa_therm1", 1}, 
+            };
+#endif
+
+//extern void cluster_actual_freq_get_all(u64 *val_pwr, u64 *val_perf);
+
+static void update_tz_info(struct work_struct *work)
+{
+    char buf[250];
+    char *s = buf;
+    int i =0;
+    struct thermal_zone_device *tzd;
+    int temperature,ret;
+//    u64 pwr_clk, perf_clk;
+
+    buf[0] = '\0';
+    for(i = 0; i < ARRAY_SIZE(fih_therm_sensor_list); i++){
+        tzd = thermal_zone_get_zone_by_name(fih_therm_sensor_list[i].type);
+
+        if (!IS_ERR(tzd)) {
+            ret = thermal_zone_get_temp(tzd, &temperature);
+            
+            if (!ret) {
+                temperature /= fih_therm_sensor_list[i].divide;
+                s += snprintf(s, sizeof(buf) - (size_t)(s-buf), "%s=%d ", 
+                        fih_therm_sensor_list[i].alias, temperature);
+            }
+        }
+    }
+
+//    cluster_actual_freq_get_all(&pwr_clk, &perf_clk);
+//    printk(KERN_INFO "TINFO:%spwrclk=%llu perfclk=%llu\n", buf, pwr_clk, perf_clk);
+    printk(KERN_INFO "TINFO:%s\n", buf);
+}
 
 long get_cpu_usage(int cpu, long*  IoWaitUsage)
 {
@@ -148,8 +233,26 @@ static int debug_cpu_usage_enable_set(const char *val, struct kernel_param *kp)
 
 module_param_call(debug_cpu_usage_enable, debug_cpu_usage_enable_set, param_get_int, &debug_cpu_usage_enable, 0644);
 
+static int debug_cpu_usage_interval_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+
+	ret = param_set_int(val, kp);
+
+	if (ret)
+		return ret;
+	
+	if (debug_cpu_usage_interval<1000) {
+		debug_cpu_usage_interval = 1000;
+	}
+	return ret;
+}
+
+module_param_call(debug_cpu_usage_interval, debug_cpu_usage_interval_set, param_get_int, &debug_cpu_usage_interval, 0644);
+
 extern void cpufreq_quick_get_infos(unsigned int cpu, unsigned int *min, unsigned int *max, unsigned int *cur);
 extern void kgsl_pwr_quick_get_infos(unsigned int *min, unsigned int *max, unsigned *curr);
+extern void quick_get_cooling_device_freq(unsigned int *curr);
 /*
 * cpu_info_msg: output message
 * msg_len: the size of output message.
@@ -164,6 +267,7 @@ static void show_cpu_usage_and_freq(char * cpu_info_msg, int msg_len)
 	unsigned int gpu_freq_min = 0;
 	unsigned int gpu_freq_max = 0;
 	unsigned int gpu_curr_freq = 0;
+	unsigned int cooling_device[2] = {0, 0};
 	long cpu_usage = 0;
 
 	long iowait_usage = 0;
@@ -193,6 +297,11 @@ static void show_cpu_usage_and_freq(char * cpu_info_msg, int msg_len)
 	cpu_freq_min /= 1000;
 	cpu_curr_freq /= 1000; /*cpu governor's current cpu frequency*/
 	tmp_len = snprintf((cpu_info_msg + str_len), len, "[CPU4 min=%u max=%u curr=%u]",cpu_freq_min, cpu_freq_max, cpu_curr_freq);	
+	str_len += tmp_len;
+	len -= tmp_len;
+
+	quick_get_cooling_device_freq(cooling_device);
+	tmp_len = snprintf((cpu_info_msg + str_len), len, "[COOL0=%u][COOL1=%u]",cooling_device[0]/1000, cooling_device[1]/1000);	
 	str_len += tmp_len;
 	len -= tmp_len;
 
@@ -226,7 +335,7 @@ static void show_cpu_usage_and_freq(char * cpu_info_msg, int msg_len)
 void count_cpu_time(void)
 {
 	
-	if (unlikely(debug_cpu_usage_enable && (1000*(jiffies_64 - Last_checked_jiffies)/HZ >= CPU_USAGE_CHECK_INTERVAL_MS))) {
+	if (unlikely(debug_cpu_usage_enable && (1000*(jiffies_64 - Last_checked_jiffies)/HZ >= debug_cpu_usage_interval))) {
 		struct task_struct * p = current;
 		struct pt_regs *regs = get_irq_regs();
 		
@@ -312,30 +421,22 @@ void count_cpu_time(void)
 				(long)regs);
 		}
 		if (debug_cpu_usage_enable & 2) {
-			char ts_name[20];
-			int ts_id[12] ={0};
-			int index =0 ,i =0;
-			int t[12] ={0};
-			
-			for(index =0; index < 10; index++){
-				snprintf(ts_name, sizeof(ts_name), "tsens_tz_sensor%d", index);
-//				if(index == 10)
-//					snprintf(ts_name, sizeof(ts_name), "pm8916_tz");
-//				if(index == 11)
-//					snprintf(ts_name, sizeof(ts_name), "battery");
-					
-				ts_id[i] = sensor_get_id(ts_name);
-				if(ts_id[i] < 0)
-					continue;
-				sensor_get_temp(ts_id[i], &t[i]);
-				if(t[i] < 0)
-					continue;
-				else if(t[i] > 1000)
-					t[i] /= 1000;
-				i++;
-			}
-			printk(KERN_INFO "tz0=%d, tz1=%d, tz2=%d, tz3=%d, CPU0=%d, CPU1=%d, CPU2=%d, CPU3=%d, tz9=%d \n", 
-					t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7],t[8]);
+            static int times = 0;
+            
+            // echo 2 > /sys/module/tick_sched_ext/parameters/debug_cpu_usage_enable
+            if (need_init_tz_info_work) {
+                INIT_DELAYED_WORK(&update_tz_info_work, update_tz_info);
+                need_init_tz_info_work = 0;
+            }
+
+            if ((times % ARM_TZ_INFO_WORK_CNT) == 0) {
+                // schedule next queue
+                schedule_delayed_work(&update_tz_info_work,
+                          round_jiffies_relative(msecs_to_jiffies(0)));
+                times = 0;
+            }
+            
+            times ++;
 		}
 	}
 

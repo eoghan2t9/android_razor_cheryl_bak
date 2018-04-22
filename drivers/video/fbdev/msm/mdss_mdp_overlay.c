@@ -577,9 +577,9 @@ static int __mdss_mdp_validate_qseed3_cfg(struct mdss_mdp_pipe *pipe)
 
 		vert_fetch_pixels = DECIMATED_DIMENSION(src_h +
 				(int8_t)(pipe->scaler.top_ftch[plane]
-					& 0xFF) +
+					& 0xFF)+
 				(int8_t)(pipe->scaler.btm_ftch[plane]
-				& 0xFF),
+					& 0xFF),
 			pipe->vert_deci);
 
 		if ((hor_req_pixels != hor_fetch_pixels) ||
@@ -2379,6 +2379,8 @@ static void __overlay_set_secure_transition_state(struct msm_fb_data_type *mfd)
 	/* Reset the secure transition state */
 	mdp5_data->secure_transition_state = SECURE_TRANSITION_NONE;
 
+	mdp5_data->cache_null_commit = list_empty(&mdp5_data->pipes_used);
+
 	/*
 	 * Secure transition would be NONE in two conditions:
 	 * 1. All the features are already disabled and state remains
@@ -2590,6 +2592,7 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	ATRACE_BEGIN("sspp_programming");
 	ret = __overlay_queue_pipes(mfd);
 	ATRACE_END("sspp_programming");
+
 	mutex_unlock(&mdp5_data->list_lock);
 
 	mdp5_data->kickoff_released = false;
@@ -3320,7 +3323,7 @@ int mdss_mdp_overlay_vsync_ctrl(struct msm_fb_data_type *mfd, int en)
 		if (en)
 			ctl->need_vsync_on = true;
 
-		rc = 0;
+		rc = -EPERM;
 		goto end;
 	}
 
@@ -3523,12 +3526,12 @@ int mdss_mdp_dfps_update_params(struct msm_fb_data_type *mfd,
 	pr_debug("new_fps:%d\n", dfps);
 
 	if (dfps < pdata->panel_info.min_fps) {
-		pr_warn("Unsupported FPS. min_fps = %d\n",
+		pr_debug("Unsupported FPS. min_fps = %d\n",
 				pdata->panel_info.min_fps);
 		mutex_unlock(&mdp5_data->dfps_lock);
 		return -EINVAL;
 	} else if (dfps > pdata->panel_info.max_fps) {
-		pr_warn("Unsupported FPS. Configuring to max_fps = %d\n",
+		pr_debug("Unsupported FPS. Configuring to max_fps = %d\n",
 				pdata->panel_info.max_fps);
 		dfps = pdata->panel_info.max_fps;
 		dfps_data->fps = dfps;
@@ -6397,6 +6400,9 @@ static void __vsync_retire_signal(struct msm_fb_data_type *mfd, int val)
 		sw_sync_timeline_inc(mdp5_data->vsync_timeline, val);
 
 		mdp5_data->retire_cnt -= min(val, mdp5_data->retire_cnt);
+		pr_debug("Retire signaled! timeline val=%d remaining=%d\n",
+				mdp5_data->vsync_timeline->value,
+				mdp5_data->retire_cnt);
 		if (mdp5_data->retire_cnt == 0) {
 			mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 			mdp5_data->ctl->ops.remove_vsync_handler(mdp5_data->ctl,
@@ -6618,6 +6624,13 @@ void mdss_mdp_footswitch_ctrl_handler(bool on)
 	mdss_mdp_footswitch_ctrl(mdata, on);
 }
 
+static void mdss_mdp_signal_retire_fence(struct msm_fb_data_type *mfd,
+						int retire_cnt)
+{
+	__vsync_retire_signal(mfd, retire_cnt);
+	pr_debug("Signaled (%d) pending retire fence\n", retire_cnt);
+}
+
 int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 {
 	struct device *dev = mfd->fbi->dev;
@@ -6659,6 +6672,7 @@ int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 	mdp5_interface->splash_init_fnc = mdss_mdp_splash_init;
 	mdp5_interface->configure_panel = mdss_mdp_update_panel_info;
 	mdp5_interface->input_event_handler = mdss_mdp_input_event_handler;
+	mdp5_interface->signal_retire_fence = mdss_mdp_signal_retire_fence;
 
 	/*
 	 * Register footswitch control only for primary fb pm

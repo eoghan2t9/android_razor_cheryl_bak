@@ -1,6 +1,6 @@
 # MSM Machine Support
 
-snd-soc-hostless-pcm-objs := msm-pcm-hostless.o
+snd-soc-hostless-pcm-objs := msm-pcm-hostless.o audio_test_mod.o
 obj-$(CONFIG_SND_SOC_MSM_HOSTLESS_PCM) += snd-soc-hostless-pcm.o
 
 obj-$(CONFIG_SND_SOC_MSM_QDSP6V2_INTF) += qdsp6v2/
@@ -13,7 +13,7 @@ snd-soc-cpe-objs := msm-cpe-lsm.o
 obj-$(CONFIG_SND_SOC_CPE) += snd-soc-cpe.o
 
 # for MSM8996 sound card driver
-snd-soc-msm8996-objs := msm8996.o
+snd-soc-msm8996-objs := msm8996.o apq8096-auto.o
 obj-$(CONFIG_SND_SOC_MSM8996) += snd-soc-msm8996.o
 
 # for MSM8998 sound card driver

@@ -680,6 +680,12 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		card->ext_csd.ffu_capable =
 			(ext_csd[EXT_CSD_SUPPORTED_MODE] & 0x1) &&
 			!(ext_csd[EXT_CSD_FW_CONFIG] & 0x1);
+
+		card->ext_csd.pre_eol_info = ext_csd[EXT_CSD_PRE_EOL_INFO];
+		card->ext_csd.device_life_time_est_typ_a =
+			ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_A];
+		card->ext_csd.device_life_time_est_typ_b =
+			ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_B];
 	}
 out:
 	return err;
@@ -722,7 +728,6 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 		return err;
 	}
 
-	card->cached_ext_csd = ext_csd;
 	err = mmc_decode_ext_csd(card, ext_csd);
 	kfree(ext_csd);
 	return err;
@@ -814,6 +819,11 @@ MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
 MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(prv, "0x%x\n", card->cid.prv);
+MMC_DEV_ATTR(rev, "0x%x\n", card->ext_csd.rev);
+MMC_DEV_ATTR(pre_eol_info, "%02x\n", card->ext_csd.pre_eol_info);
+MMC_DEV_ATTR(life_time, "0x%02x 0x%02x\n",
+	card->ext_csd.device_life_time_est_typ_a,
+	card->ext_csd.device_life_time_est_typ_b);
 MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
 MMC_DEV_ATTR(enhanced_area_offset, "%llu\n",
 		card->ext_csd.enhanced_area_offset);
@@ -852,6 +862,9 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_oemid.attr,
 	&dev_attr_prv.attr,
+	&dev_attr_rev.attr,
+	&dev_attr_pre_eol_info.attr,
+	&dev_attr_life_time.attr,
 	&dev_attr_serial.attr,
 	&dev_attr_enhanced_area_offset.attr,
 	&dev_attr_enhanced_area_size.attr,
@@ -1310,10 +1323,6 @@ int mmc_hs400_to_hs200(struct mmc_card *card)
 	if (host->caps & MMC_CAP_WAIT_WHILE_BUSY)
 		send_status = false;
 
-	/* Reduce frequency to HS */
-	max_dtr = card->ext_csd.hs_max_dtr;
-	mmc_set_clock(host, max_dtr);
-
 	/* Switch HS400 to HS DDR */
 	val = EXT_CSD_TIMING_HS;
 	err = __mmc_switch(card, EXT_CSD_CMD_SET_NORMAL, EXT_CSD_HS_TIMING,
@@ -1323,6 +1332,10 @@ int mmc_hs400_to_hs200(struct mmc_card *card)
 		goto out_err;
 
 	mmc_set_timing(host, MMC_TIMING_MMC_DDR52);
+
+	/* Reduce frequency to HS */
+	max_dtr = card->ext_csd.hs_max_dtr;
+	mmc_set_clock(host, max_dtr);
 
 	if (!send_status) {
 		err = mmc_switch_status(card, false);
@@ -2032,10 +2045,10 @@ reinit:
 		err = mmc_select_hs400(card);
 		if (err)
 			goto free_card;
-	} else if (mmc_card_hs(card)) {
+	} else if (!mmc_card_hs400(card)) {
 		/* Select the desired bus width optionally */
 		err = mmc_select_bus_width(card);
-		if (!IS_ERR_VALUE(err)) {
+		if (!IS_ERR_VALUE(err) && mmc_card_hs(card)) {
 			err = mmc_select_hs_ddr(card);
 			if (err)
 				goto free_card;
@@ -2043,11 +2056,11 @@ reinit:
 	}
 
 	card->clk_scaling_lowest = host->f_min;
-	if ((card->mmc_avail_type | EXT_CSD_CARD_TYPE_HS400) ||
-			(card->mmc_avail_type | EXT_CSD_CARD_TYPE_HS200))
+	if ((card->mmc_avail_type & EXT_CSD_CARD_TYPE_HS400) ||
+			(card->mmc_avail_type & EXT_CSD_CARD_TYPE_HS200))
 		card->clk_scaling_highest = card->ext_csd.hs200_max_dtr;
-	else if ((card->mmc_avail_type | EXT_CSD_CARD_TYPE_HS) ||
-			(card->mmc_avail_type | EXT_CSD_CARD_TYPE_DDR_52))
+	else if ((card->mmc_avail_type & EXT_CSD_CARD_TYPE_HS) ||
+			(card->mmc_avail_type & EXT_CSD_CARD_TYPE_DDR_52))
 		card->clk_scaling_highest = card->ext_csd.hs_max_dtr;
 	else
 		card->clk_scaling_highest = card->csd.max_dtr;
@@ -2604,6 +2617,9 @@ static int mmc_partial_init(struct mmc_host *host)
 	if (mmc_card_hs400(card)) {
 		if (card->ext_csd.strobe_support && host->ops->enhanced_strobe)
 			err = host->ops->enhanced_strobe(host);
+		else if (host->ops->execute_tuning)
+			err = host->ops->execute_tuning(host,
+				MMC_SEND_TUNING_BLOCK_HS200);
 	} else if (mmc_card_hs200(card) && host->ops->execute_tuning) {
 		err = host->ops->execute_tuning(host,
 			MMC_SEND_TUNING_BLOCK_HS200);

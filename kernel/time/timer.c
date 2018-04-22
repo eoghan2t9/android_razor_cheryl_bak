@@ -53,7 +53,6 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/timer.h>
-//#define KPI_ADD
 
 __visible u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
 
@@ -501,38 +500,6 @@ static void internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 	}
 }
 
-#ifdef CONFIG_TIMER_STATS
-void __timer_stats_timer_set_start_info(struct timer_list *timer, void *addr)
-{
-	if (timer->start_site)
-		return;
-
-	timer->start_site = addr;
-	memcpy(timer->start_comm, current->comm, TASK_COMM_LEN);
-	timer->start_pid = current->pid;
-}
-
-static void timer_stats_account_timer(struct timer_list *timer)
-{
-	void *site;
-
-	/*
-	 * start_site can be concurrently reset by
-	 * timer_stats_timer_clear_start_info()
-	 */
-	site = READ_ONCE(timer->start_site);
-	if (likely(!site))
-		return;
-
-	timer_stats_update_stats(timer, timer->start_pid, site,
-				 timer->function, timer->start_comm,
-				 timer->flags);
-}
-
-#else
-static void timer_stats_account_timer(struct timer_list *timer) {}
-#endif
-
 #ifdef CONFIG_DEBUG_OBJECTS_TIMERS
 
 static struct debug_obj_descr timer_debug_descr;
@@ -735,11 +702,6 @@ static void do_init_timer(struct timer_list *timer, unsigned int flags,
 	timer->entry.pprev = NULL;
 	timer->flags = flags | raw_smp_processor_id();
 	timer->slack = -1;
-#ifdef CONFIG_TIMER_STATS
-	timer->start_site = NULL;
-	timer->start_pid = -1;
-	memset(timer->start_comm, 0, TASK_COMM_LEN);
-#endif
 	lockdep_init_map(&timer->lockdep_map, name, key, 0);
 }
 
@@ -846,7 +808,6 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 	unsigned long flags;
 	int ret = 0;
 
-	timer_stats_timer_set_start_info(timer);
 	BUG_ON(!timer->function);
 
 	base = lock_timer_base(timer, &flags);
@@ -1045,7 +1006,6 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	struct tvec_base *base;
 	unsigned long flags;
 
-	timer_stats_timer_set_start_info(timer);
 	BUG_ON(timer_pending(timer) || !timer->function);
 
 	/*
@@ -1090,7 +1050,6 @@ int del_timer(struct timer_list *timer)
 
 	debug_assert_init(timer);
 
-	timer_stats_timer_clear_start_info(timer);
 	if (timer_pending(timer)) {
 		base = lock_timer_base(timer, &flags);
 		ret = detach_if_pending(timer, base, true);
@@ -1118,10 +1077,9 @@ int try_to_del_timer_sync(struct timer_list *timer)
 
 	base = lock_timer_base(timer, &flags);
 
-	if (base->running_timer != timer) {
-		timer_stats_timer_clear_start_info(timer);
+	if (base->running_timer != timer)
 		ret = detach_if_pending(timer, base, true);
-	}
+
 	spin_unlock_irqrestore(&base->lock, flags);
 
 	return ret;
@@ -1304,8 +1262,6 @@ static inline void __run_timers(struct tvec_base *base)
 			fn = timer->function;
 			data = timer->data;
 			irqsafe = timer->flags & TIMER_IRQSAFE;
-
-			timer_stats_account_timer(timer);
 
 			base->running_timer = timer;
 			detach_expired_timer(timer, base);
@@ -1783,7 +1739,6 @@ static void __init init_timer_cpus(void)
 void __init init_timers(void)
 {
 	init_timer_cpus();
-	init_timer_stats();
 	timer_register_cpu_notifier();
 	open_softirq(TIMER_SOFTIRQ, run_timer_softirq);
 }
@@ -1796,13 +1751,6 @@ void msleep(unsigned int msecs)
 {
 	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
 
-    #ifdef KPI_ADD
-    if(msecs>=5)
-    {
-     printk(KERN_ERR"KPI msleep %um\n",msecs);
-     dump_stack();
-    }
-	#endif
 	while (timeout)
 		timeout = schedule_timeout_uninterruptible(timeout);
 }
@@ -1817,13 +1765,6 @@ unsigned long msleep_interruptible(unsigned int msecs)
 {
 	unsigned long timeout = msecs_to_jiffies(msecs) + 1;
 
-    #ifdef KPI_ADD
-    if(msecs>=1)
-    {
-     printk(KERN_ERR"KPI msleep_interruptible %um\n",msecs);
-     //dump_stack();
-    }
-    #endif
 	while (timeout && !signal_pending(current))
 		timeout = schedule_timeout_interruptible(timeout);
 	return jiffies_to_msecs(timeout);
@@ -1841,14 +1782,6 @@ void __sched usleep_range(unsigned long min, unsigned long max)
 	ktime_t exp = ktime_add_us(ktime_get(), min);
 	u64 delta = (u64)(max - min) * NSEC_PER_USEC;
 
-    #ifdef KPI_ADD
-    if(min>=5000 || max>=5000)
-    {
-     printk(KERN_ERR"KPI usleep_range %lum %lum\n",min/1000,max/1000);
-     if(min>=10000 || max>=10000)
-      dump_stack();
-    }
-	#endif
 	for (;;) {
 		__set_current_state(TASK_UNINTERRUPTIBLE);
 		/* Do not return before the requested sleep time has elapsed */

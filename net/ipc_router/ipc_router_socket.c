@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -138,6 +138,10 @@ static int msm_ipc_router_extract_msg(struct msghdr *m,
 	hdr = &(pkt->hdr);
 	if (addr && (hdr->type == IPC_ROUTER_CTRL_CMD_RESUME_TX)) {
 		temp = skb_peek(pkt->pkt_fragment_q);
+		if (!temp || !temp->data) {
+			IPC_RTR_ERR("%s: Invalid skb\n", __func__);
+			return -EINVAL;
+		}
 		ctl_msg = (union rr_control_msg *)(temp->data);
 		addr->family = AF_MSM_IPC;
 		addr->address.addrtype = MSM_IPC_ADDR_ID;
@@ -229,35 +233,23 @@ int msm_ipc_router_bind(struct socket *sock, struct sockaddr *uaddr,
 		return -EINVAL;
 
 	if (!check_permissions()) {
-/* FIH: just workaround before fix root cause */
-#if 0
 		IPC_RTR_ERR("%s: %s Do not have permissions\n",
 			__func__, current->comm);
-#endif
 		return -EPERM;
 	}
 
 	if (!uaddr_len) {
-/* FIH: just workaround before fix root cause */
-#if 0
 		IPC_RTR_ERR("%s: Invalid address length\n", __func__);
-#endif
 		return -EINVAL;
 	}
 
 	if (addr->family != AF_MSM_IPC) {
-/* FIH: just workaround before fix root cause */
-#if 0
 		IPC_RTR_ERR("%s: Address family is incorrect\n", __func__);
-#endif
 		return -EAFNOSUPPORT;
 	}
 
 	if (addr->address.addrtype != MSM_IPC_ADDR_NAME) {
-/* FIH: just workaround before fix root cause */
-#if 0
 		IPC_RTR_ERR("%s: Address type is incorrect\n", __func__);
-#endif
 		return -EINVAL;
 	}
 

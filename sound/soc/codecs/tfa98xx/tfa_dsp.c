@@ -1432,6 +1432,7 @@ enum Tfa98xx_Error tfa_dsp_msg_status(Tfa98xx_handle_t handle, int *pRpcStatus) 
 const char* tfa98xx_get_i2c_status_id_string(int status)
 {
         const char* p_id_str;
+        char latest_errorstr[64];
 
         switch (status)
         {
@@ -1463,7 +1464,9 @@ const char* tfa98xx_get_i2c_status_id_string(int status)
                         p_id_str = "I2C buffer has overflowed: host has sent too many parameters, memory integrity is not guaranteed";
                         break;
                 default:
-                        p_id_str = "Unspecified error";
+                        sprintf(latest_errorstr, "Unspecified error (%d)", (int)status);
+                        p_id_str = latest_errorstr;
+                        break;
         }
 
         return p_id_str;
@@ -2628,7 +2631,7 @@ enum Tfa98xx_Error tfaRunSpeakerCalibration(Tfa98xx_handle_t handle, int profile
 
 		if (spkr_count == 1) {
 			pr_err("tfa98xx: %s()  %d mOhms \n", __func__, handles_local[handle].mohm[0]);
-			if( handles_local[handle].mohm[0] < 6000 || handles_local[handle].mohm[0] > 8000)
+			if( handles_local[handle].mohm[0] < 6000 || handles_local[handle].mohm[0] > 9000)
 			{
 				/*MM-JohnHCChiang-BBS log-01+{ */
 				printk("BBox;SmartAmp impedance out of range\n");

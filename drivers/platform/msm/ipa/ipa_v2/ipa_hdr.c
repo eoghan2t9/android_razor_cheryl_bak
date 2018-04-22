@@ -600,12 +600,12 @@ static int __ipa_add_hdr_proc_ctx(struct ipa_hdr_proc_ctx_add *proc_ctx,
 	mem_size = (ipa_ctx->hdr_proc_ctx_tbl_lcl) ?
 		IPA_MEM_PART(apps_hdr_proc_ctx_size) :
 		IPA_MEM_PART(apps_hdr_proc_ctx_size_ddr);
-	if (htbl->end + ipa_hdr_proc_ctx_bin_sz[bin] > mem_size) {
-		IPAERR_RL("hdr proc ctx table overflow\n");
-		goto bad_len;
-	}
-
 	if (list_empty(&htbl->head_free_offset_list[bin])) {
+		if (htbl->end + ipa_hdr_proc_ctx_bin_sz[bin] > mem_size) {
+			IPAERR_RL("hdr proc ctx table overflow\n");
+			goto bad_len;
+		}
+
 		offset = kmem_cache_zalloc(ipa_ctx->hdr_proc_ctx_offset_cache,
 					   GFP_KERNEL);
 		if (!offset) {
@@ -649,8 +649,7 @@ static int __ipa_add_hdr_proc_ctx(struct ipa_hdr_proc_ctx_add *proc_ctx,
 	return 0;
 
 ipa_insert_failed:
-	if (offset)
-		list_move(&offset->link,
+	list_move(&offset->link,
 		&htbl->head_free_offset_list[offset->bin]);
 	entry->offset_entry = NULL;
 	list_del(&entry->link);
@@ -720,30 +719,30 @@ static int __ipa_add_hdr(struct ipa_hdr_add *hdr)
 	mem_size = (ipa_ctx->hdr_tbl_lcl) ? IPA_MEM_PART(apps_hdr_size) :
 		IPA_MEM_PART(apps_hdr_size_ddr);
 
-	/*
-	 * if header does not fit to table, place it in DDR
-	 * This is valid for IPA 2.5 and on,
-	 * with the exception of IPA2.6L.
-	 */
-	if (htbl->end + ipa_hdr_bin_sz[bin] > mem_size) {
-		if (ipa_ctx->ipa_hw_type != IPA_HW_v2_5) {
-			IPAERR("not enough room for header\n");
-			goto bad_hdr_len;
-		} else {
-			entry->is_hdr_proc_ctx = true;
-			entry->phys_base = dma_map_single(ipa_ctx->pdev,
-				entry->hdr,
-				entry->hdr_len,
-				DMA_TO_DEVICE);
-			if (dma_mapping_error(ipa_ctx->pdev,
-				entry->phys_base)) {
-				IPAERR("dma_map_single failure for entry\n");
-				goto fail_dma_mapping;
+	if (list_empty(&htbl->head_free_offset_list[bin])) {
+		/*
+		 * if header does not fit to table, place it in DDR
+		 * This is valid for IPA 2.5 and on,
+		 * with the exception of IPA2.6L.
+		 */
+		if (htbl->end + ipa_hdr_bin_sz[bin] > mem_size) {
+			if (ipa_ctx->ipa_hw_type != IPA_HW_v2_5) {
+				IPAERR("not enough room for header\n");
+				goto bad_hdr_len;
+			} else {
+				entry->is_hdr_proc_ctx = true;
+				entry->phys_base = dma_map_single(ipa_ctx->pdev,
+					entry->hdr,
+					entry->hdr_len,
+					DMA_TO_DEVICE);
+				if (dma_mapping_error(ipa_ctx->pdev,
+					entry->phys_base)) {
+					IPAERR("dma_map_single failureed\n");
+					goto fail_dma_mapping;
+				}
 			}
-		}
-	} else {
-		entry->is_hdr_proc_ctx = false;
-		if (list_empty(&htbl->head_free_offset_list[bin])) {
+		} else {
+			entry->is_hdr_proc_ctx = false;
 			offset = kmem_cache_zalloc(ipa_ctx->hdr_offset_cache,
 						   GFP_KERNEL);
 			if (!offset) {
@@ -760,14 +759,15 @@ static int __ipa_add_hdr(struct ipa_hdr_add *hdr)
 			htbl->end += ipa_hdr_bin_sz[bin];
 			list_add(&offset->link,
 					&htbl->head_offset_list[bin]);
-		} else {
-			/* get the first free slot */
-			offset =
-			list_first_entry(&htbl->head_free_offset_list[bin],
-					struct ipa_hdr_offset_entry, link);
-			list_move(&offset->link, &htbl->head_offset_list[bin]);
+			entry->offset_entry = offset;
 		}
-
+	} else {
+		entry->is_hdr_proc_ctx = false;
+		/* get the first free slot */
+		offset =
+		list_first_entry(&htbl->head_free_offset_list[bin],
+				struct ipa_hdr_offset_entry, link);
+		list_move(&offset->link, &htbl->head_offset_list[bin]);
 		entry->offset_entry = offset;
 	}
 
@@ -910,8 +910,17 @@ int __ipa_del_hdr(u32 hdr_hdl, bool by_user)
 		return -EINVAL;
 	}
 
-	if (by_user)
+	if (by_user) {
+		if (!strcmp(entry->name, IPA_LAN_RX_HDR_NAME)) {
+			IPADBG("Trying to delete hdr %s offset=%u\n",
+				entry->name, entry->offset_entry->offset);
+			if (!entry->offset_entry->offset) {
+				IPAERR("User cannot delete default header\n");
+				return -EPERM;
+			}
+		}
 		entry->user_deleted = true;
+	}
 
 	if (--entry->ref_cnt) {
 		IPADBG("hdr_hdl %x ref_cnt %d\n", hdr_hdl, entry->ref_cnt);
@@ -1234,13 +1243,18 @@ int ipa2_reset_hdr(void)
 
 		/* do not remove the default header */
 		if (!strcmp(entry->name, IPA_LAN_RX_HDR_NAME)) {
-			if (entry->is_hdr_proc_ctx) {
-				mutex_unlock(&ipa_ctx->lock);
-				WARN_ON(1);
-				IPAERR("default header is proc ctx\n");
-				return -EFAULT;
+			IPADBG("Trying to remove hdr %s offset=%u\n",
+				entry->name, entry->offset_entry->offset);
+			if (!entry->offset_entry->offset) {
+				if (entry->is_hdr_proc_ctx) {
+					mutex_unlock(&ipa_ctx->lock);
+					WARN_ON(1);
+					IPAERR("default header is proc ctx\n");
+					return -EFAULT;
+				}
+				IPADBG("skip default header\n");
+				continue;
 			}
-			continue;
 		}
 
 		if (ipa_id_find(entry->id) == NULL) {

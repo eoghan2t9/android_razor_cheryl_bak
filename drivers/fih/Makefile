@@ -15,7 +15,6 @@ obj-$(CONFIG_FIH_BLOG) += fih_blog.o
 obj-$(CONFIG_FIH_UFSINFO) += fih_ufsinfo.o
 obj-$(CONFIG_FIH_FVER) += fih_fver.o
 obj-$(CONFIG_FIH_MFR) += fih_mfr.o
-obj-$(CONFIG_FIH_HALL_SENSOR) += hallsensor/
 obj-$(CONFIG_FIH_SUT) += fih_sut.o
 obj-y += fih_lcm.o
 obj-$(CONFIG_FIH_DDRTEST) += fih_ddr_test.o

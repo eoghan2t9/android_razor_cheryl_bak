@@ -142,6 +142,7 @@
 #define CORE_START_CDC_TRAFFIC		(1 << 6)
 
 #define CORE_PWRSAVE_DLL	(1 << 3)
+#define CORE_FIFO_ALT_EN	(1 << 10)
 #define CORE_CMDEN_HS400_INPUT_MASK_CNT (1 << 13)
 
 #define CORE_DDR_CAL_EN		(1 << 0)
@@ -1840,7 +1841,7 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	}
 
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
-	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
+	if (gpio_is_valid(pdata->status_gpio) && !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
 
 	of_property_read_u32(np, "qcom,bus-width", &bus_width);
@@ -1975,7 +1976,7 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	sdhci_msm_pm_qos_parse(dev, pdata);
 
 	if (of_get_property(np, "qcom,core_3_0v_support", NULL))
-		pdata->core_3_0v_support = true;
+		msm_host->core_3_0v_support = true;
 
 	pdata->sdr104_wa = of_property_read_bool(np, "qcom,sdr104-wa");
 
@@ -2658,7 +2659,9 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 	 */
 	mb();
 
-	if ((io_level & REQ_IO_HIGH) && (msm_host->caps_0 & CORE_3_0V_SUPPORT))
+	if ((io_level & REQ_IO_HIGH) &&
+			(msm_host->caps_0 & CORE_3_0V_SUPPORT) &&
+			!msm_host->core_3_0v_support)
 		writel_relaxed((readl_relaxed(host->ioaddr +
 				msm_host_offset->CORE_VENDOR_SPEC) &
 				~CORE_IO_PAD_PWR_SWITCH), host->ioaddr +
@@ -3330,6 +3333,21 @@ static void sdhci_msm_cmdq_dump_debug_ram(struct sdhci_host *host)
 	pr_err("-------------------------\n");
 }
 
+static void sdhci_msm_cache_debug_data(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+	struct sdhci_msm_debug_data *cached_data = &msm_host->cached_data;
+
+	memcpy(&cached_data->copy_mmc, msm_host->mmc,
+		sizeof(struct mmc_host));
+	if (msm_host->mmc->card)
+		memcpy(&cached_data->copy_card, msm_host->mmc->card,
+			sizeof(struct mmc_card));
+	memcpy(&cached_data->copy_host, host,
+		sizeof(struct sdhci_host));
+}
+
 void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -3342,6 +3360,7 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 	u32 debug_reg[MAX_TEST_BUS] = {0};
 	u32 sts = 0;
 
+	sdhci_msm_cache_debug_data(host);
 	pr_info("----------- VENDOR REGISTER DUMP -----------\n");
 	if (host->cq_host)
 		sdhci_msm_cmdq_dump_debug_ram(host);
@@ -3923,8 +3942,8 @@ void sdhci_msm_pm_qos_cpu_init(struct sdhci_host *host,
 		group->req.type = PM_QOS_REQ_AFFINE_CORES;
 		cpumask_copy(&group->req.cpus_affine,
 			&msm_host->pdata->pm_qos_data.cpu_group_map.mask[i]);
-		/* For initialization phase, set the performance mode latency */
-		group->latency = latency[i].latency[SDHCI_PERFORMANCE_MODE];
+		/* We set default latency here for all pm_qos cpu groups. */
+		group->latency = PM_QOS_DEFAULT_VALUE;
 		pm_qos_add_request(&group->req, PM_QOS_CPU_DMA_LATENCY,
 			group->latency);
 		pr_info("%s (): voted for group #%d (mask=0x%lx) latency=%d (0x%p)\n",
@@ -4136,11 +4155,11 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	 * starts coming.
 	 */
 	if ((major == 1) && ((minor == 0x42) || (minor == 0x46) ||
-				(minor == 0x49)))
+				(minor == 0x49) || (minor >= 0x6b)))
 		msm_host->use_14lpp_dll = true;
 
 	/* Fake 3.0V support for SDIO devices which requires such voltage */
-	if (msm_host->pdata->core_3_0v_support) {
+	if (msm_host->core_3_0v_support) {
 		caps |= CORE_3_0V_SUPPORT;
 			writel_relaxed((readl_relaxed(host->ioaddr +
 			SDHCI_CAPABILITIES) | caps), host->ioaddr +
@@ -4161,8 +4180,10 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	/* keep track of the value in SDHCI_CAPABILITIES */
 	msm_host->caps_0 = caps;
 
-	if ((major == 1) && (minor >= 0x6b))
+	if ((major == 1) && (minor >= 0x6b)) {
 		msm_host->ice_hci_support = true;
+		host->cdr_support = true;
+	}
 }
 
 #ifdef CONFIG_MMC_CQ_HCI
@@ -4458,6 +4479,14 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	writel_relaxed(CORE_VENDOR_SPEC_POR_VAL,
 	host->ioaddr + msm_host_offset->CORE_VENDOR_SPEC);
 
+	/*
+	 * Ensure SDHCI FIFO is enabled by disabling alternative FIFO
+	 */
+	writel_relaxed((readl_relaxed(host->ioaddr +
+			msm_host_offset->CORE_VENDOR_SPEC3) &
+			~CORE_FIFO_ALT_EN), host->ioaddr +
+			msm_host_offset->CORE_VENDOR_SPEC3);
+
 	if (!msm_host->mci_removed) {
 		/* Set HC_MODE_EN bit in HC_MODE register */
 		writel_relaxed(HC_MODE_EN, (msm_host->core_mem + CORE_HC_MODE));
@@ -4712,6 +4741,9 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 		       mmc_hostname(host->mmc), __func__, ret);
 		device_remove_file(&pdev->dev, &msm_host->auto_cmd21_attr);
 	}
+	if (sdhci_msm_is_bootdevice(&pdev->dev))
+		mmc_flush_detect_work(host->mmc);
+
 	/* Successful initialization */
 	goto out;
 
@@ -4989,7 +5021,7 @@ static int sdhci_msm_suspend_noirq(struct device *dev)
 }
 
 static const struct dev_pm_ops sdhci_msm_pmops = {
-	SET_SYSTEM_SLEEP_PM_OPS(sdhci_msm_suspend, sdhci_msm_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(sdhci_msm_suspend, sdhci_msm_resume)
 	SET_RUNTIME_PM_OPS(sdhci_msm_runtime_suspend, sdhci_msm_runtime_resume,
 			   NULL)
 	.suspend_noirq = sdhci_msm_suspend_noirq,
@@ -5013,6 +5045,7 @@ static struct platform_driver sdhci_msm_driver = {
 	.driver		= {
 		.name	= "sdhci_msm",
 		.owner	= THIS_MODULE,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = sdhci_msm_dt_match,
 		.pm	= SDHCI_MSM_PMOPS,
 	},

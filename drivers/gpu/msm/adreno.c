@@ -902,6 +902,9 @@ static int adreno_of_get_power(struct adreno_device *adreno_dev,
 	device->pwrctrl.bus_control = of_property_read_bool(node,
 		"qcom,bus-control");
 
+	device->pwrctrl.input_disable = of_property_read_bool(node,
+		"qcom,disable-wake-on-touch");
+
 	return 0;
 }
 
@@ -1016,15 +1019,19 @@ static int adreno_probe(struct platform_device *pdev)
 	/* Initialize coresight for the target */
 	adreno_coresight_init(adreno_dev);
 
-	adreno_input_handler.private = device;
-
 #ifdef CONFIG_INPUT
-	/*
-	 * It isn't fatal if we cannot register the input handler.  Sad,
-	 * perhaps, but not fatal
-	 */
-	if (input_register_handler(&adreno_input_handler))
-		KGSL_DRV_ERR(device, "Unable to register the input handler\n");
+	if (!device->pwrctrl.input_disable) {
+		adreno_input_handler.private = device;
+		/*
+		 * It isn't fatal if we cannot register the input handler.  Sad,
+		 * perhaps, but not fatal
+		 */
+		if (input_register_handler(&adreno_input_handler)) {
+			adreno_input_handler.private = NULL;
+			KGSL_DRV_ERR(device,
+				"Unable to register the input handler\n");
+		}
+	}
 #endif
 out:
 	if (status) {
@@ -1076,7 +1083,8 @@ static int adreno_remove(struct platform_device *pdev)
 	_adreno_free_memories(adreno_dev);
 
 #ifdef CONFIG_INPUT
-	input_unregister_handler(&adreno_input_handler);
+	if (adreno_input_handler.private)
+		input_unregister_handler(&adreno_input_handler);
 #endif
 	adreno_sysfs_close(adreno_dev);
 
@@ -1720,6 +1728,30 @@ static int adreno_getproperty(struct kgsl_device *device,
 			status = 0;
 		}
 		break;
+	case KGSL_PROP_DEVICE_QTIMER:
+		{
+			struct kgsl_qtimer_prop qtimerprop = {0};
+			struct kgsl_memdesc *qtimer_desc =
+				kgsl_mmu_get_qtimer_global_entry(device);
+
+			if (sizebytes != sizeof(qtimerprop)) {
+				status = -EINVAL;
+				break;
+			}
+
+			if (qtimer_desc) {
+				qtimerprop.gpuaddr = qtimer_desc->gpuaddr;
+				qtimerprop.size = qtimer_desc->size;
+			}
+
+			if (copy_to_user(value, &qtimerprop,
+						sizeof(qtimerprop))) {
+				status = -EFAULT;
+				break;
+			}
+			status = 0;
+		}
+		break;
 	case KGSL_PROP_MMU_ENABLE:
 		{
 			/* Report MMU only if we can handle paged memory */
@@ -2114,6 +2146,11 @@ static int adreno_soft_reset(struct kgsl_device *device)
 	kgsl_cffdump_close(device);
 	/* Reset the GPU */
 	_soft_reset(adreno_dev);
+
+	/* Clear the busy_data stats - we're starting over from scratch */
+	adreno_dev->busy_data.gpu_busy = 0;
+	adreno_dev->busy_data.vbif_ram_cycles = 0;
+	adreno_dev->busy_data.vbif_starved_ram = 0;
 
 	/* Set the page table back to the default page table */
 	adreno_ringbuffer_set_global(adreno_dev, 0);

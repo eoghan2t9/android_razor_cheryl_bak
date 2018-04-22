@@ -133,7 +133,6 @@ static struct dev_config tdm_tx_cfg[TDM_INTERFACE_MAX][TDM_PORT_MAX] = {
 static struct dev_config ext_disp_rx_cfg[] = {
 	[DP_RX_IDX] =   {SAMPLING_RATE_48KHZ, SNDRV_PCM_FORMAT_S16_LE, 2},
 };
-
 static struct dev_config usb_rx_cfg = {
 	.sample_rate = SAMPLING_RATE_48KHZ,
 	.bit_format = SNDRV_PCM_FORMAT_S16_LE,
@@ -3087,8 +3086,6 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 					"qcom,cdc-dmic-gpios", 0);
 		pdata->ext_spk_gpio_p = of_parse_phandle(pdev->dev.of_node,
 					"qcom,cdc-ext-spk-gpios", 0);
-		pdata->tert_mi2s_gpio_p = of_parse_phandle(pdev->dev.of_node,
-					"qcom,tert-mi2s-gpios", 0);
 	}
 
 	/*

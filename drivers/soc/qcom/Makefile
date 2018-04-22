@@ -2,8 +2,6 @@ KASAN_SANITIZE_scm.o := n
 
 CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
 
-CFLAGS_tracer_pkt.o := -I$(src)
-
 ccflags-$(CONFIG_MSM_QBT1000) += -Idrivers/misc/
 
 obj-$(CONFIG_MSM_INRUSH_CURRENT_MITIGATION) += inrush-current-mitigation.o
@@ -64,6 +62,7 @@ CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
 
 obj-$(CONFIG_QCOM_SCM_ERRATA) += scm-errata.o
 obj-$(CONFIG_QCOM_SCM)  +=      scm.o scm-boot.o
+obj-$(CONFIG_QCOM_SCM_QCPE)  += scm_qcpe.o
 obj-$(CONFIG_QCOM_SCM_XPU) += scm-xpu.o
 obj-$(CONFIG_QCOM_WATCHDOG_V2) += watchdog_v2.o
 obj-$(CONFIG_QCOM_MEMORY_DUMP) += memory_dump.o
@@ -88,6 +87,7 @@ obj-$(CONFIG_MSM_CORE_HANG_DETECT) += core_hang_detect.o
 obj-$(CONFIG_MSM_GLADIATOR_HANG_DETECT) += gladiator_hang_detect.o
 obj-$(CONFIG_MSM_RUN_QUEUE_STATS) += msm_rq_stats.o
 obj-$(CONFIG_MSM_BOOT_STATS) += boot_stats.o
+obj-$(CONFIG_MSM_BOOT_TIME_MARKER) += boot_marker.o
 obj-$(CONFIG_MSM_AVTIMER) += avtimer.o
 ifdef CONFIG_ARCH_MSM8996
 obj-$(CONFIG_HW_PERF_EVENTS) += perf_event_kryo.o
@@ -106,3 +106,4 @@ obj-$(CONFIG_WCD_DSP_GLINK) += wcd-dsp-glink.o
 obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke.o
 obj-$(CONFIG_QCOM_EARLY_RANDOM)	+= early_random.o
 obj-$(CONFIG_QCOM_CX_IPEAK) += cx_ipeak.o
+obj-$(CONFIG_MSM_CACHE_M4M_ERP64) += cache_m4m_erp64.o

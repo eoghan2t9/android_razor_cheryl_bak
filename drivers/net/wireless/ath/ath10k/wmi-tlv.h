@@ -308,11 +308,15 @@ enum wmi_tlv_event_id {
 	WMI_TLV_VDEV_STOPPED_EVENTID,
 	WMI_TLV_VDEV_INSTALL_KEY_COMPLETE_EVENTID,
 	WMI_TLV_VDEV_MCC_BCN_INTERVAL_CHANGE_REQ_EVENTID,
+	WMI_TLV_VDEV_TSF_REPORT_EVENTID,
+	WMI_TLV_VDEV_DELETE_RESP_EVENTID,
 	WMI_TLV_PEER_STA_KICKOUT_EVENTID = WMI_TLV_EV(WMI_TLV_GRP_PEER),
 	WMI_TLV_PEER_INFO_EVENTID,
 	WMI_TLV_PEER_TX_FAIL_CNT_THR_EVENTID,
 	WMI_TLV_PEER_ESTIMATED_LINKSPEED_EVENTID,
 	WMI_TLV_PEER_STATE_EVENTID,
+	WMI_TLV_PEER_ASSOC_CONF_EVENTID,
+	WMI_TLV_PEER_DELETE_RESP_EVENTID,
 	WMI_TLV_MGMT_RX_EVENTID = WMI_TLV_EV(WMI_TLV_GRP_MGMT),
 	WMI_TLV_HOST_SWBA_EVENTID,
 	WMI_TLV_TBTTOFFSET_UPDATE_EVENTID,
@@ -894,6 +898,7 @@ enum wmi_tlv_tag {
 	WMI_TLV_TAG_STRUCT_HL_1_0_SVC_OFFSET = 176,
 
 	WMI_TLV_TAG_STRUCT_MGMT_TX_CMD = 0x1A6,
+	WMI_TLV_TAG_STRUCT_PEER_DELETE_RESP_EVENT = 0x1C3,
 
 	WMI_TLV_TAG_MAX
 };
@@ -1394,6 +1399,10 @@ struct wmi_tlv_phyerr_ev {
 	__le32 tsf_l32;
 	__le32 tsf_u32;
 	__le32 buf_len;
+	__le32 pdev_id;
+	__le32 rs_phy_err_mask0;
+	__le32 rs_phy_err_mask1;
+	__le32 rs_phy_err_mask2;
 } __packed;
 
 enum wmi_tlv_dbglog_param {
@@ -1549,6 +1558,21 @@ struct wmi_tlv_wow_add_del_event_cmd {
 
 struct wmi_tlv_wow_enable_cmd {
 	__le32 enable;
+	__le32 pause_iface_config;
+} __packed;
+
+struct wmi_tlv_arp_ns_offload_cmd {
+	__le32 flags;
+	__le32 vdev_id;
+	__le32 num_ns_ext_tuples;
+} __packed;
+
+struct wmi_tlv_gtk_offload_cmd {
+	__le32 vdev_id;
+	__le32 flags;
+	u8 kek[NL80211_KEK_LEN];
+	u8 kck[NL80211_KCK_LEN];
+	__le64 replay_ctr;
 } __packed;
 
 struct wmi_tlv_wow_host_wakeup_ind {

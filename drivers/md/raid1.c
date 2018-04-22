@@ -570,7 +570,7 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio, int *max_sect
 			if (best_dist_disk < 0) {
 				if (is_badblock(rdev, this_sector, sectors,
 						&first_bad, &bad_sectors)) {
-					if (first_bad < this_sector)
+					if (first_bad <= this_sector)
 						/* Cannot use this */
 						continue;
 					best_good_sectors = first_bad - this_sector;
@@ -730,9 +730,9 @@ static int raid1_congested(struct mddev *mddev, int bits)
 			 * non-congested targets, it can be removed
 			 */
 			if ((bits & (1 << WB_async_congested)) || 1)
-				ret |= bdi_congested(&q->backing_dev_info, bits);
+				ret |= bdi_congested(q->backing_dev_info, bits);
 			else
-				ret &= bdi_congested(&q->backing_dev_info, bits);
+				ret &= bdi_congested(q->backing_dev_info, bits);
 		}
 	}
 	rcu_read_unlock();
@@ -877,7 +877,8 @@ static sector_t wait_barrier(struct r1conf *conf, struct bio *bio)
 				     ((conf->start_next_window <
 				       conf->next_resync + RESYNC_SECTORS) &&
 				      current->bio_list &&
-				      !bio_list_empty(current->bio_list))),
+				     (!bio_list_empty(&current->bio_list[0]) ||
+				      !bio_list_empty(&current->bio_list[1])))),
 				    conf->resync_lock);
 		conf->nr_waiting--;
 	}

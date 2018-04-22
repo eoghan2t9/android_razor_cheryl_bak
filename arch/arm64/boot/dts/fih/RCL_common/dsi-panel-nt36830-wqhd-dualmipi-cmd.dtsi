@@ -59,7 +59,7 @@
 		qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_wled";
 		qcom,mdss-dsi-bl-min-level = <1>;
 		qcom,mdss-dsi-bl-max-level = <4095>;
-		razer,mdss-dsi-bl-skip-enabled;
+		//razer,mdss-dsi-bl-skip-enabled;
 		razer,mdss-dsi-bl-skip-range = <900 1310>;
 		qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
 		qcom,mdss-dsi-panel-timings = [00 0f 04 03 06 0b 04 04 03 03 04 00];
@@ -143,7 +143,7 @@
 			39 01 00 00 00 00 03 51 0f ff
 			15 01 00 00 00 00 02 55 03
 			15 01 00 00 00 00 02 53 2c
-			15 01 00 00 00 00 02 b1 01
+			15 01 00 00 00 00 02 b1 04
 			05 01 00 00 78 00 01 11
 			05 01 00 00 00 00 01 29
 		];
@@ -245,30 +245,34 @@
 			39 01 00 00 00 00 03 51 0f ff
 			29 01 00 00 00 00 02 55 03
 			29 01 00 00 00 00 02 53 2c
-			29 01 00 00 00 00 02 b1 01
+			29 01 00 00 00 00 02 b1 04
 			05 01 00 00 78 00 01 11
 			05 01 00 00 00 00 01 29
 		];
 
+		/*
+		 ie_low: smart color, skin keep, V contrain, keep Y, Brightness Level 3
+		 Don't use the other IE modes
+		*/
 		razer,ie_sre_enable-state = "dsi_hs_mode";
 		razer,ie_sre_enable = [
 				29 01 00 00 00 00 02 ff 22
 				29 01 00 00 00 00 02 fb 01
-				29 01 00 00 00 00 02 53 07
-				29 01 00 00 00 00 02 54 07
-				29 01 00 00 00 00 02 55 07
-				29 01 00 00 00 00 02 56 07
-				29 01 00 00 00 00 02 73 00
-				29 01 00 00 00 00 02 83 00
-				29 01 00 00 00 00 02 B3 00
-				29 01 00 00 00 00 02 B7 01
-				29 01 00 00 00 00 02 B8 00
-				29 01 00 00 00 00 02 B9 03
-				29 01 00 00 00 00 02 C6 04
-				29 01 00 00 00 00 02 C8 24
+				29 01 00 00 00 00 02 53 07 // enable smart color
+				29 01 00 00 00 00 02 54 07 // en skin keep
+				29 01 00 00 00 00 02 55 07 // en v contrain
+				29 01 00 00 00 00 02 56 07 // en keep y
+				29 01 00 00 00 00 02 73 00 // disable SMART_ENH_RATIO
+				29 01 00 00 00 00 02 83 00 // disable hue rotation
+				29 01 00 00 00 00 02 B3 00 // disable edge enhancement
+				29 01 00 00 00 00 02 B7 01 // disable SRE and enable sunlight level (brightness level) for ie_low
+				29 01 00 00 00 00 02 B8 00 // disable smart contrast
+				29 01 00 00 00 00 02 B9 03 // brightness levels for ie_low
+				29 01 00 00 00 00 02 C6 04 // bg_weighting
+				29 01 00 00 00 00 02 C8 24 // SR bright/dark level -- weak to strong (0-7)
 				29 01 00 00 00 00 02 ff 10
 				29 01 00 00 00 00 02 fb 01
-				29 01 00 00 00 00 02 55 00
+				29 01 00 00 00 00 02 55 00 /* << Need to fill in [7:3] with level */
 		];
 
 		razer,night-mode-on-commands-state = "dsi_hs_mode";

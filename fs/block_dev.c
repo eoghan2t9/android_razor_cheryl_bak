@@ -88,12 +88,11 @@ void invalidate_bdev(struct block_device *bdev)
 {
 	struct address_space *mapping = bdev->bd_inode->i_mapping;
 
-	if (mapping->nrpages == 0)
-		return;
-
-	invalidate_bh_lrus();
-	lru_add_drain_all();	/* make sure all lru add caches are flushed */
-	invalidate_mapping_pages(mapping, 0, -1);
+	if (mapping->nrpages) {
+		invalidate_bh_lrus();
+		lru_add_drain_all();	/* make sure all lru add caches are flushed */
+		invalidate_mapping_pages(mapping, 0, -1);
+	}
 	/* 99% of the time, we don't need to flush the cleancache on the bdev.
 	 * But, for the strange corners, lets be cautious
 	 */
@@ -533,6 +532,7 @@ static void init_once(void *foo)
 #ifdef CONFIG_SYSFS
 	INIT_LIST_HEAD(&bdev->bd_holder_disks);
 #endif
+	bdev->bd_bdi = &noop_backing_dev_info;
 	inode_init_once(&ei->vfs_inode);
 	/* Initialize mutex for freeze. */
 	mutex_init(&bdev->bd_fsfreeze_mutex);
@@ -558,6 +558,10 @@ static void bdev_evict_inode(struct inode *inode)
 	}
 	list_del_init(&bdev->bd_list);
 	spin_unlock(&bdev_lock);
+	if (bdev->bd_bdi != &noop_backing_dev_info) {
+		bdi_put(bdev->bd_bdi);
+		bdev->bd_bdi = &noop_backing_dev_info;
+	}
 }
 
 static const struct super_operations bdev_sops = {
@@ -623,6 +627,21 @@ static int bdev_set(struct inode *inode, void *data)
 }
 
 static LIST_HEAD(all_bdevs);
+
+/*
+ * If there is a bdev inode for this device, unhash it so that it gets evicted
+ * as soon as last inode reference is dropped.
+ */
+void bdev_unhash_inode(dev_t dev)
+{
+	struct inode *inode;
+
+	inode = ilookup5(blockdev_superblock, hash(dev), bdev_test, &dev);
+	if (inode) {
+		remove_inode_hash(inode);
+		iput(inode);
+	}
+}
 
 struct block_device *bdget(dev_t dev)
 {
@@ -759,7 +778,7 @@ static bool bd_may_claim(struct block_device *bdev, struct block_device *whole,
 		return true;	 /* already a holder */
 	else if (bdev->bd_holder != NULL)
 		return false; 	 /* held by someone else */
-	else if (bdev->bd_contains == bdev)
+	else if (whole == bdev)
 		return true;  	 /* is a whole device which isn't held */
 
 	else if (whole->bd_holder == bd_may_claim)
@@ -1098,7 +1117,6 @@ int revalidate_disk(struct gendisk *disk)
 
 	if (disk->fops->revalidate_disk)
 		ret = disk->fops->revalidate_disk(disk);
-	blk_integrity_revalidate(disk);
 	bdev = bdget_disk(disk, 0);
 	if (!bdev)
 		return ret;
@@ -1203,6 +1221,9 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 		bdev->bd_disk = disk;
 		bdev->bd_queue = disk->queue;
 		bdev->bd_contains = bdev;
+		if (bdev->bd_bdi == &noop_backing_dev_info)
+			bdev->bd_bdi = bdi_get(disk->queue->backing_dev_info);
+
 		bdev->bd_inode->i_flags = disk->fops->direct_access ? S_DAX : 0;
 		if (!partno) {
 			ret = -ENXIO;
@@ -1304,6 +1325,8 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 	bdev->bd_disk = NULL;
 	bdev->bd_part = NULL;
 	bdev->bd_queue = NULL;
+	bdi_put(bdev->bd_bdi);
+	bdev->bd_bdi = &noop_backing_dev_info;
 	if (bdev != bdev->bd_contains)
 		__blkdev_put(bdev->bd_contains, mode, 1);
 	bdev->bd_contains = NULL;

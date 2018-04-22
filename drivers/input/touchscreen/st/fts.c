@@ -108,10 +108,13 @@ int read_register_result(void);
 void fts_fih_tp_rst(void);
 void fts_fih_tp_enable(int flag);
 void fts_touch_notify_charger_connect(u32 type);
-
+int fih_power_sequence(int enable);
+void touch_side_touch_enable(unsigned int enable);
+unsigned int touch_side_touch_status(void);
 int stSelfTestResult;
 int g_iTouchDownCount = 0;
 static unsigned int double_tap_enable = 0;
+static unsigned int side_touch_status = 0;
 struct fts_ts_info *g_info;
 long tp_st_count = 0;
 u32 g_usb_status = 0;
@@ -356,10 +359,25 @@ END:
 // N1, ... = the decimal value of each node separated by a coma
 //*********************************
 // BB = end byte
+static ssize_t fts_strength_frame_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	char *p = (char *)buf;
+	//unsigned int temp;
+	//int res;
+	//struct i2c_client *client = to_i2c_client(dev);
+	//struct fts_ts_info *info = i2c_get_clientdata(client);
+
+
+	sscanf(p, "%d ", &typeOfComand[0]);
+
+	logError(1, "%s %s: Type of Strength Frame selected: %d\n", tag, __func__, typeOfComand[0]);
+
+	return count;
+}
 static ssize_t fts_strength_frame_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
     MutualSenseFrame frame;
-    int res, count, j, size =6*2;
+	int res= ERROR_OP_NOT_ALLOW, count, j, size =6*2;
+	u16 type = 0;
     char *all_strbuff = NULL;
     char buff[CMD_STR_LEN] = {0};
     struct i2c_client *client = to_i2c_client(dev);
@@ -372,15 +390,20 @@ static ssize_t fts_strength_frame_show(struct device *dev, struct device_attribu
         goto END;
 
     res = senseOn();
-    if(res<OK)
-    {
+#ifdef PHONE_KEY
+	res = keyOn();
+#endif
+	if(res<OK){
         logError(1,"%s %s: could not start scanning! ERROR %08X \n",tag,__func__,res);
         goto END;
     }
     mdelay(WAIT_FOR_FRESH_FRAMES);
+
     res = senseOff();
-    if(res<OK)
-    {
+#ifdef PHONE_KEY
+	res = keyOff();
+#endif
+	if(res<OK){
         logError(1,"%s %s: could not finish scanning! ERROR %08X \n",tag,__func__,res);
         goto END;
     }
@@ -388,7 +411,21 @@ static ssize_t fts_strength_frame_show(struct device *dev, struct device_attribu
     mdelay(WAIT_AFTER_SENSEOFF);
     flushFIFO();
 
-    res = getMSFrame(ADDR_NORM_TOUCH, &frame, 0);
+	switch(typeOfComand[0]){
+		case 1:
+			type = ADDR_NORM_TOUCH;
+			break;
+#ifdef PHONE_KEY
+		case 2:
+			type = ADDR_NORM_MS_KEY;
+			break;
+#endif
+		default:
+			logError(1,"%s %s: Strength type %d not valid! ERROR %08X\n",tag,__func__, typeOfComand[0], ERROR_OP_NOT_ALLOW);
+			res = ERROR_OP_NOT_ALLOW;
+			goto END;
+	}
+    res = getMSFrame(type, &frame, 0);
     if(res<OK)
     {
         logError(1,"%s %s: could not get the frame! ERROR %08X \n",tag,__func__,res);
@@ -616,6 +653,12 @@ static ssize_t fts_feature_enable_store(struct device *dev, struct device_attrib
                 break;
 #endif
 
+#ifdef SIDE_TOUCH
+		case FEAT_SIDE_TOUCH:
+			sscanf(p, "%02X ", &info->side_touch_enabled);
+			logError(1, "%s fts_feature_enable: Side Touch Enabled = %d \n", tag, info->side_touch_enabled);
+			break;
+#endif
 
 
             default:
@@ -1334,6 +1377,76 @@ static ssize_t fts_stylus_mode_store(struct device *dev, struct device_attribute
 }
 #endif
 
+#ifdef SIDE_TOUCH
+//echo 01/00 > side_touch     to enable/disable side touch
+//cat side_touch		    to show the status of the side_touch_enabled switch (example output in the terminal = "AA00000001BB" if the switch is enabled)
+//echo 01/00 > side_touch; cat side_touch 		to enable/disable side touch and see the switch status in just one call
+static ssize_t fts_side_touch_show(struct device *dev, struct device_attribute *attr, char *buf) {
+    char buff[CMD_STR_LEN] = {0};
+    int size = 6 * 2;
+    u8 *all_strbuff = NULL;
+    int count=0;
+    struct i2c_client *client = to_i2c_client(dev);
+    struct fts_ts_info *info = i2c_get_clientdata(client);
+
+    logError(0, "%s %s: side_touch_enabled = %d \n", tag, __func__, info->side_touch_enabled);
+
+    all_strbuff = (u8 *) kmalloc(size, GFP_KERNEL);
+    if(all_strbuff!=NULL){
+        memset(all_strbuff, 0, size);
+
+        snprintf(buff, sizeof (buff), "%02X", 0xAA);
+        strncat(all_strbuff, buff, size);
+
+        snprintf(buff, sizeof (buff), "%08X", info->side_touch_enabled);
+        strncat(all_strbuff, buff, size);
+
+        snprintf(buff, sizeof (buff), "%02X", 0xBB);
+        strncat(all_strbuff, buff, size);
+
+        count = snprintf(buf, TSP_BUF_SIZE, "%s\n", all_strbuff);
+        kfree(all_strbuff);
+    }else{
+        logError(1, "%s %s: Unable to allocate all_strbuff! ERROR %08X\n", tag, __func__, ERROR_ALLOC);
+    }
+
+    return count;
+}
+
+
+static ssize_t fts_side_touch_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+    char *p = (char *)buf;
+    unsigned int temp;
+    int res;
+    struct i2c_client *client = to_i2c_client(dev);
+    struct fts_ts_info *info = i2c_get_clientdata(client);
+
+
+    //in case of a different elaboration of the input, just modify this initial part of the code according to customer needs
+    if ((count + 1) / 3 !=1) {
+        logError(1, "%s %s: Number of bytes of parameter wrong! %d != %d byte\n", tag, __func__, (count + 1) / 3, 1);
+    }
+    else {
+        sscanf(p, "%02X ", &temp);
+        p += 3;
+
+//this is a standard code that should be always used when a feature is enabled!
+//first step : check if the wanted feature can be enabled
+//second step: call fts_mode_handler to actually enable it
+//NOTE: Disabling a feature is always allowed by default
+        res = check_feature_feasibility(info,FEAT_EDGE_SIDE_TOUCH);
+        if(res>=OK || temp==FEAT_DISABLE){
+            info->side_touch_enabled=temp;
+            res = fts_mode_handler(info,1);
+            if(res<OK){
+                logError(1, "%s %s: Error during fts_mode_handler! ERROR %08X\n", tag, __func__, res);
+            }
+        }
+    }
+    return count;
+}
+#endif
+
 #endif
 
 /***************************************** GESTURES ***************************************************/
@@ -1835,10 +1948,10 @@ static ssize_t stm_fts_cmd_show(struct device *dev, struct device_attribute *att
     TestToDo todoDefault;
 
     todoDefault.MutualRaw = 1;
-    todoDefault.MutualRawGap = 1;
+    todoDefault.MutualRawGap = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCx1 = 0;
-    todoDefault.MutualCx2 = 1;
-    todoDefault.MutualCx2Adj = 1;
+    todoDefault.MutualCx2 = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
+    todoDefault.MutualCx2Adj = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCxTotal = 0;
     todoDefault.MutualCxTotalAdj = 0;
 
@@ -1852,7 +1965,7 @@ static ssize_t stm_fts_cmd_show(struct device *dev, struct device_attribute *att
     todoDefault.SelfForceIx1 = 0;
     todoDefault.SelfForceIx2 = 0;
     todoDefault.SelfForceIx2Adj = 0;
-    todoDefault.SelfForceIxTotal = 1;
+    todoDefault.SelfForceIxTotal = 0;//SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfForceIxTotalAdj = 0;
     todoDefault.SelfForceCx1 = 0;
     todoDefault.SelfForceCx2 = 0;
@@ -1865,7 +1978,7 @@ static ssize_t stm_fts_cmd_show(struct device *dev, struct device_attribute *att
     todoDefault.SelfSenseIx1 = 0;
     todoDefault.SelfSenseIx2 = 0;
     todoDefault.SelfSenseIx2Adj = 0;
-    todoDefault.SelfSenseIxTotal = 1;
+    todoDefault.SelfSenseIxTotal = 0;//SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfSenseIxTotalAdj = 0;
     todoDefault.SelfSenseCx1 = 0;
     todoDefault.SelfSenseCx2 = 0;
@@ -2201,7 +2314,7 @@ static DEVICE_ATTR(fwupdate, (S_IRUGO | S_IWUSR | S_IWGRP), fts_fwupdate_show, f
 static DEVICE_ATTR(appid, (S_IRUGO), fts_sysfs_config_id_show, NULL);
 static DEVICE_ATTR(mode_active, (S_IRUGO), fts_mode_active_show, NULL);
 static DEVICE_ATTR(lockdown_info, (S_IRUGO), fts_lockdown_info_show, NULL);
-static DEVICE_ATTR(strength_frame, (S_IRUGO), fts_strength_frame_show, NULL);
+static DEVICE_ATTR(strength_frame, (S_IRUGO | S_IWUSR | S_IWGRP), fts_strength_frame_show, fts_strength_frame_store);
 static DEVICE_ATTR(fw_file_test, (S_IRUGO), fts_fw_test_show, NULL);
 static DEVICE_ATTR(stm_fts_cmd, (S_IRUGO | S_IWUSR | S_IWGRP), stm_fts_cmd_show, stm_fts_cmd_store);
 #ifdef USE_ONE_FILE_NODE
@@ -2238,6 +2351,10 @@ static DEVICE_ATTR(cover_mode, (S_IRUGO | S_IWUSR | S_IWGRP), fts_cover_mode_sho
 
 #ifdef STYLUS_MODE
 static DEVICE_ATTR(stylus_mode, (S_IRUGO | S_IWUSR | S_IWGRP), fts_stylus_mode_show, fts_stylus_mode_store);
+#endif
+
+#ifdef SIDE_TOUCH
+static DEVICE_ATTR(side_touch, (S_IRUGO | S_IWUSR | S_IWGRP), fts_side_touch_show, fts_side_touch_store);
 #endif
 
 #endif
@@ -2289,6 +2406,9 @@ static struct attribute *fts_attr_group[] =
 #ifdef STYLUS_MODE
     &dev_attr_stylus_mode.attr,
 #endif
+#ifdef SIDE_TOUCH
+	&dev_attr_side_touch.attr,
+#endif
 
 #endif
 
@@ -2322,8 +2442,10 @@ static int fts_command(struct fts_ts_info *info, unsigned char cmd)
 void fts_input_report_key(struct fts_ts_info *info, int key_code)
 {
     mutex_lock(&info->input_report_mutex);
+    logError(0, "%s %s Send key event %d to 1\n", tag, __func__, key_code);
     input_report_key(info->input_dev, key_code, 1);
     input_sync(info->input_dev);
+    logError(0, "%s %s Send key event %d to 0\n", tag, __func__, key_code);
     input_report_key(info->input_dev, key_code, 0);
     input_sync(info->input_dev);
     mutex_unlock(&info->input_report_mutex);
@@ -2463,6 +2585,37 @@ static void fts_leave_pointer_event_handler(struct fts_ts_info *info,
 /* EventId : 0x05 */
 #define fts_motion_pointer_event_handler fts_enter_pointer_event_handler
 
+#ifdef SIDE_TOUCH
+#define fts_edge_enter_pointer_event_handler fts_side_touch_detect_event_handler
+#define fts_edge_leave_pointer_event_handler fts_leave_pointer_event_handler
+#define fts_edge_motion_pointer_event_handler fts_enter_pointer_event_handler
+
+static void fts_side_touch_detect_event_handler(struct fts_ts_info *info,
+        unsigned char *event) {
+    unsigned char touchenter = event[1];
+	side_touch_status = 0;
+    if (touchenter == 0x10) {
+		side_touch_status = 1;
+        logError(1, "%s %s side touch detect enter(%d)\n", tag, __func__, side_touch_status);
+		fts_input_report_key(info, KEY_WAKEUP);
+        // side touch detect enter
+    }
+    else {
+        logError(1, "%s %s side touch detect leave(%d)\n", tag, __func__, side_touch_status);
+        // side touch detect leave
+    }
+	if(g_info != NULL)
+	{
+		if(g_info->side_touch_enabled == FEAT_ENABLE)
+		{
+			fih_write_switch_antenna(side_touch_status);
+		}
+	}
+
+}
+
+#endif
+
 #ifdef PHONE_KEY
 /* EventId : 0x0E */
 static void fts_key_status_event_handler(struct fts_ts_info *info, unsigned char *event)
@@ -2516,6 +2669,7 @@ static void fts_error_event_handler(struct fts_ts_info *info,
     switch (event[1])
     {
     case EVENT_TYPE_ESD_ERROR: //esd
+    case EVENT_TYPE_SS_TUNING_CMPL: //0x02
     {
         //before reset clear all slot
         release_all_touches(info);
@@ -2642,6 +2796,7 @@ static void fts_gesture_event_handler(struct fts_ts_info *info, unsigned char *e
         {
         case GES_ID_DBLTAP:
             value = KEY_WAKEUP;
+            //value = KEY_AMBIENT_EVENT;//For Ambient Display
             logError(0, "%s %s: double tap ! \n", tag, __func__);
             needCoords = 0;
             break;
@@ -2884,10 +3039,10 @@ static int cx_crc_check(void)
             return readData[2];
         }
     }
-
+#endif
     return OK; //return OK if no CRC error, or a number >OK if crc error
 }
-#endif
+
 static void fts_fw_update_auto(struct work_struct *work)
 {
 #ifndef FTM3_CHIP
@@ -3013,10 +3168,10 @@ static int fts_chip_initialization(struct fts_ts_info *info)
     TestToDo todoDefault;
 
     todoDefault.MutualRaw = 1;
-    todoDefault.MutualRawGap = 1;
+    todoDefault.MutualRawGap = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCx1 = 0;
-    todoDefault.MutualCx2 = 1;
-    todoDefault.MutualCx2Adj = 1;
+    todoDefault.MutualCx2 = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
+    todoDefault.MutualCx2Adj = 0;//SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.MutualCxTotal = 0;
     todoDefault.MutualCxTotalAdj = 0;
 
@@ -3030,7 +3185,7 @@ static int fts_chip_initialization(struct fts_ts_info *info)
     todoDefault.SelfForceIx1 = 0;
     todoDefault.SelfForceIx2 = 0;
     todoDefault.SelfForceIx2Adj = 0;
-    todoDefault.SelfForceIxTotal = 1;
+    todoDefault.SelfForceIxTotal = 0;//SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfForceIxTotalAdj = 0;
     todoDefault.SelfForceCx1 = 0;
     todoDefault.SelfForceCx2 = 0;
@@ -3043,7 +3198,7 @@ static int fts_chip_initialization(struct fts_ts_info *info)
     todoDefault.SelfSenseIx1 = 0;
     todoDefault.SelfSenseIx2 = 0;
     todoDefault.SelfSenseIx2Adj = 0;
-    todoDefault.SelfSenseIxTotal = 1;
+    todoDefault.SelfSenseIxTotal = 0;//SW5-DH-Disable_TestItem_by_ST_Request+
     todoDefault.SelfSenseIxTotalAdj = 0;
     todoDefault.SelfSenseCx1 = 0;
     todoDefault.SelfSenseCx2 = 0;
@@ -3121,6 +3276,12 @@ static int fts_interrupt_install(struct fts_ts_info *info)
 #endif
 #ifdef PHONE_KEY
     install_handler(info, KEY_STATUS, key_status);
+#endif
+#ifdef SIDE_TOUCH
+    install_handler(info, EDGE_ENTER_POINTER, edge_enter_pointer);
+    install_handler(info, EDGE_LEAVE_POINTER, edge_leave_pointer);
+    install_handler(info, EDGE_MOTION_POINTER, edge_motion_pointer);
+	install_handler(info, SIDE_TOUCH_DETECT, side_touch_detect);
 #endif
 
     /* disable interrupts in any case */
@@ -3393,8 +3554,25 @@ static int fts_mode_handler(struct fts_ts_info *info,int force)
         res |=fts_command(info, FTS_CMD_MS_KEY_OFF);
 #endif
 
+#ifdef SIDE_TOUCH
+	if (info->side_touch_enabled == FEAT_ENABLE) {
+		logError(0, "%s %s: Side Touch setting... \n", tag, __func__);
+		ret=featureEnableDisable(info->side_touch_enabled, FEAT_SIDE_TOUCH);
+		if (ret < OK) {
+			logError(1, "%s %s: error during setting SIDE_TOUCH_MODE! ERROR %08X\n", tag, __func__, ret);
+		}
+		res |= ret;
+		if (ret>=OK) {
+			info->mode |= FEAT_SIDE_TOUCH;
+			logError(1, "%s %s: SIDE_TOUCH_MODE Enabled! \n", tag, __func__);
+		} else {
+			logError(1, "%s %s: SIDE_TOUCH_MODE Disabled! \n", tag, __func__);
+		}
+	}
+#endif
+
 #ifdef PHONE_GESTURE
-        if (info->gesture_enabled==1)
+        if (info->gesture_enabled==1 || info->side_touch_enabled == FEAT_ENABLE)
         {
             logError(0, "%s %s: enter in gesture mode ! \n", tag, __func__);
             ret=enterGestureMode(isSystemResettedDown());
@@ -3409,6 +3587,7 @@ static int fts_mode_handler(struct fts_ts_info *info,int force)
             res|=ret;
         }
 #endif
+
         if(info->mode != (FEAT_GESTURE|MODE_NOTHING) || info->gesture_enabled==0)
         {
 
@@ -3606,6 +3785,22 @@ static int fts_mode_handler(struct fts_ts_info *info,int force)
 
         }
 #endif
+#ifdef SIDE_TOUCH
+            if ((info->side_touch_enabled == FEAT_ENABLE && isSystemResettedUp()) || force == 1) {
+                logError(0, "%s %s: Side Touch setting... \n", tag, __func__);
+                ret=featureEnableDisable(info->side_touch_enabled, FEAT_SIDE_TOUCH);
+                if (ret < OK) {
+                    logError(1, "%s %s: error during setting SIDE_TOUCH_MODE! ERROR %08X\n", tag, __func__, ret);
+                }
+                res |= ret;
+                if (ret>=OK && info->side_touch_enabled == FEAT_ENABLE) {
+                    info->mode |= FEAT_SIDE_TOUCH;
+                    logError(1, "%s %s: SIDE_TOUCH_MODE Enabled! \n", tag, __func__);
+                } else {
+                    logError(1, "%s %s: SIDE_TOUCH_MODE Disabled! \n", tag, __func__);
+                }
+            }
+#endif
         logError(0, "%s %s: Sense ON! \n", tag, __func__);
         res |=fts_command(info, FTS_CMD_MS_MT_SENSE_ON);
         info->mode |= MODE_SENSEON;
@@ -3628,6 +3823,87 @@ static int fts_mode_handler(struct fts_ts_info *info,int force)
 
 }
 
+int fih_power_sequence(int enable)
+{
+	int error;
+	struct fts_ts_info *info = g_info;
+
+	if(info == NULL)
+	{
+		logError(1, "%s %s: ERROR, info is null\n", tag, __func__);
+		return error;
+	}
+
+    logError(1, "%s %s: Starting %s \n", tag, __func__, (enable ? "enable" : "disable"));
+
+	if(enable == 0)
+	{
+	    logError(1, "%s %s: Disabling IRQ... \n", tag, __func__);	//if IRQ pin is short with DVDD a call to the ISR will triggered when the regulator is turned off
+	    disable_irq_nosync(info->client->irq);
+	    if (info->pwr_reg)
+	    {
+	        error = regulator_disable(info->pwr_reg);
+	        if (error < 0)
+	        {
+	            logError(1, "%s %s: Failed to disable DVDD regulator\n", tag, __func__);
+	        }
+	    }
+
+	    if (info->bus_reg)
+	    {
+	        error = regulator_disable(info->bus_reg);
+	        if (error < 0)
+	        {
+	            logError(1, "%s %s: Failed to disable AVDD regulator\n", tag, __func__);
+	        }
+	    }
+
+	    if (info->bdata->reset_gpio != GPIO_NOT_DEFINED)
+	        gpio_set_value(info->bdata->reset_gpio, 0);
+
+	}
+	else
+	{
+	    if (info->pwr_reg)
+	    {
+	        error = regulator_enable(info->bus_reg);
+	        if (error < 0)
+	        {
+	            logError(1, "%s %s: Failed to enable AVDD regulator\n", tag, __func__);
+	        }
+	    }
+
+	    if (info->bus_reg)
+	    {
+	        error = regulator_enable(info->pwr_reg);
+	        if (error < 0)
+	        {
+	            logError(1, "%s %s: Failed to enable DVDD regulator\n", tag, __func__);
+	        }
+	    }
+	    mdelay(10); //time needed by the regulators for reaching the regime values
+
+
+	    if (info->bdata->reset_gpio != GPIO_NOT_DEFINED)
+	    {
+	        mdelay(10); //time to wait before bring up the reset gpio after the power up of the regulators
+	        gpio_set_value(info->bdata->reset_gpio, 1);
+	        //mdelay(300);
+	    }
+
+	    release_all_touches(info);
+
+	    logError(1, "%s %s: Enabling IRQ... \n", tag, __func__);
+	    enable_irq(info->client->irq);
+
+	    setSystemResettedUp(1);
+	    setSystemResettedDown(1);
+	}
+
+    logError(1, "%s %s: %s End! ERROR CODE = %08x\n", tag, __func__, (enable ? "enable" : "disable"),error);
+
+	return error;
+}
 
 static void fts_resume_work(struct work_struct *work)
 {
@@ -3640,6 +3916,8 @@ static void fts_resume_work(struct work_struct *work)
 
     wake_lock_timeout(&info->wakelock, HZ);
 
+	if(double_tap_enable == 0 && info->side_touch_enabled == 0)
+		fih_power_sequence(1);
 
     info->resume_bit = 1;
 
@@ -3681,6 +3959,12 @@ static void fts_suspend_work(struct work_struct *work)
 
     info->sensor_sleep = true;
 
+	if(double_tap_enable == 0 && info->side_touch_enabled == 0)
+	{
+		fts_disableInterrupt();
+		fih_power_sequence(0);
+	}
+	else
     fts_enableInterrupt();
 	logError(0, "%s %s: Enter suspend....-\n", tag, __func__);
 	
@@ -3726,7 +4010,7 @@ static int fts_fb_state_chg_callback(struct notifier_block *nb, unsigned long va
 
             queue_work(info->event_wq, &info->resume_work);
             break;
-        default:
+         default:           
             break;
 
         }
@@ -4036,10 +4320,10 @@ void stm_fts_fih_cmd(void)
 		stSelfTestResult = 1;
 
         todoDefault.MutualRaw           = 1;
-        todoDefault.MutualRawGap        = 1;
+        todoDefault.MutualRawGap        = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
         todoDefault.MutualCx1           = 0;
-        todoDefault.MutualCx2           = 1;
-        todoDefault.MutualCx2Adj        = 1;
+        todoDefault.MutualCx2           = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
+        todoDefault.MutualCx2Adj        = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
         todoDefault.MutualCxTotal       = 0;
         todoDefault.MutualCxTotalAdj    = 0;
 
@@ -4053,7 +4337,7 @@ void stm_fts_fih_cmd(void)
         todoDefault.SelfForceIx1        = 0;
         todoDefault.SelfForceIx2        = 0;
         todoDefault.SelfForceIx2Adj     = 0;
-        todoDefault.SelfForceIxTotal    = 1;
+        todoDefault.SelfForceIxTotal    = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
         todoDefault.SelfForceIxTotalAdj = 0;
         todoDefault.SelfForceCx1        = 0;
         todoDefault.SelfForceCx2        = 0;
@@ -4066,7 +4350,7 @@ void stm_fts_fih_cmd(void)
         todoDefault.SelfSenseIx1        = 0;
         todoDefault.SelfSenseIx2        = 0;
         todoDefault.SelfSenseIx2Adj     = 0;
-        todoDefault.SelfSenseIxTotal    = 1;
+        todoDefault.SelfSenseIxTotal    = 0; //SW5-DH-Disable_TestItem_by_ST_Request+
         todoDefault.SelfSenseIxTotalAdj = 0;
         todoDefault.SelfSenseCx1        = 0;
         todoDefault.SelfSenseCx2        = 0;
@@ -4522,6 +4806,30 @@ int touch_double_tap_write(unsigned int enable)
 	gesture_mask[0] = 0;
 	return 0;
 }
+unsigned int touch_side_touch_status(void)
+{
+	logError(1, "%s, touch_side_touch_status = %d\n", tag, side_touch_status);
+	return side_touch_status;
+}
+
+void touch_side_touch_enable(unsigned int enable)
+{
+    int res;
+	if(g_info != NULL)
+	{
+		res = check_feature_feasibility(g_info, FEAT_SIDE_TOUCH);
+
+	    if(res>=OK || enable == FEAT_DISABLE)
+		{
+	        g_info->side_touch_enabled = enable;
+	        res = fts_mode_handler(g_info, 1);
+	        if(res<OK)
+			{
+	            logError(1, "%s %s: Error during fts_mode_handler! ERROR %08X\n", tag, __func__, res);
+	        }
+	    }
+	}
+}
 int read_register_result(void)
 {
        pr_info("F@TOUCH %s tp_st_count=%ld, version = V%04X.%04X",__func__,tp_st_count, ftsInfo.u16_fwVer, ftsInfo.u16_cfgId);
@@ -4659,8 +4967,6 @@ static int fts_probe(struct i2c_client *client,
 
     logError(1, "%s SET I2C Functionality and Dev INFO: \n", tag);
     openChannel(client);
-    //logError(1, "%s driver ver. %s (built on %s, %s)\n", tag,
-    //        FTS_TS_DRV_VERSION, __DATE__, __TIME__);
     logError(1, "%s driver ver. %s (built on)\n", tag,
              FTS_TS_DRV_VERSION);
 
@@ -4790,6 +5096,8 @@ static int fts_probe(struct i2c_client *client,
 
 #ifdef PHONE_GESTURE
     input_set_capability(info->input_dev, EV_KEY, KEY_WAKEUP);
+    input_set_capability(info->input_dev, EV_KEY, KEY_AMBIENT_EVENT);//Dennis, Ambient Display
+
 
     input_set_capability(info->input_dev, EV_KEY, KEY_M);
     input_set_capability(info->input_dev, EV_KEY, KEY_O);
@@ -4867,7 +5175,7 @@ static int fts_probe(struct i2c_client *client,
     info->edge_rej_enabled = 1;
     info->corner_rej_enabled = 1;
     info->edge_palm_rej_enabled = 1;
-
+    info->side_touch_enabled = 0;
 
     info->resume_bit = 1;
     info->notifier = fts_noti_block;
@@ -4945,6 +5253,8 @@ static int fts_probe(struct i2c_client *client,
     touch_cb.touch_selftest_result = stm_fts_fih_read_result;
 	touch_cb.touch_double_tap_read = touch_double_tap_read;
 	touch_cb.touch_double_tap_write = touch_double_tap_write;
+	touch_cb.touch_side_touch_enable = touch_side_touch_enable;
+	touch_cb.touch_side_touch_status = touch_side_touch_status;
 	//SW8-JH-ALT test+[
     touch_cb.touch_alt_st_count = read_register_result;
     touch_cb.touch_alt_rst = fts_fih_tp_rst;

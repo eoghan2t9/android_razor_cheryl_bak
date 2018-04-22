@@ -795,6 +795,28 @@ void _ipa_sram_settings_read_v3_0(void)
 }
 
 /**
+ * ipa3_cfg_clkon_cfg() - configure IPA clkon_cfg
+ * @clkon_cfg: IPA clkon_cfg
+ *
+ * Return codes:
+ * 0: success
+ */
+int ipa3_cfg_clkon_cfg(struct ipahal_reg_clkon_cfg *clkon_cfg)
+{
+
+	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
+
+	IPADBG("cgc_open_misc = %d\n",
+		clkon_cfg->cgc_open_misc);
+
+	ipahal_write_reg_fields(IPA_CLKON_CFG, clkon_cfg);
+
+	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
+
+	return 0;
+}
+
+/**
  * ipa3_cfg_route() - configure IPA route
  * @route: IPA route
  *
@@ -1002,7 +1024,7 @@ u8 ipa3_get_qmb_master_sel(enum ipa_client_type client)
 
 void ipa3_set_client(int index, enum ipacm_client_enum client, bool uplink)
 {
-	if (client >= IPACM_CLIENT_MAX || client < IPACM_CLIENT_USB) {
+	if (client > IPACM_CLIENT_MAX || client < IPACM_CLIENT_USB) {
 		IPAERR("Bad client number! client =%d\n", client);
 	} else if (index >= IPA3_MAX_NUM_PIPES || index < 0) {
 		IPAERR("Bad pipe index! index =%d\n", index);
@@ -2839,7 +2861,7 @@ static int ipa3_tag_generate_force_close_desc(struct ipa3_desc desc[],
 			IPAHAL_FULL_PIPELINE_CLEAR;
 		reg_write_agg_close.offset =
 			ipahal_get_reg_ofst(IPA_AGGR_FORCE_CLOSE);
-		ipahal_get_aggr_force_close_valmask(1<<i, &valmask);
+		ipahal_get_aggr_force_close_valmask(i, &valmask);
 		reg_write_agg_close.value = valmask.val;
 		reg_write_agg_close.value_mask = valmask.mask;
 		cmd_pyld = ipahal_construct_imm_cmd(IPA_IMM_CMD_REGISTER_WRITE,
@@ -2961,10 +2983,17 @@ bool ipa3_is_client_handle_valid(u32 clnt_hdl)
  */
 void ipa3_proxy_clk_unvote(void)
 {
-	if (ipa3_is_ready() && ipa3_ctx->q6_proxy_clk_vote_valid) {
+	if (!ipa3_is_ready())
+		return;
+
+	mutex_lock(&ipa3_ctx->q6_proxy_clk_vote_mutex);
+	if (ipa3_ctx->q6_proxy_clk_vote_valid) {
 		IPA_ACTIVE_CLIENTS_DEC_SPECIAL("PROXY_CLK_VOTE");
-		ipa3_ctx->q6_proxy_clk_vote_valid = false;
+		ipa3_ctx->q6_proxy_clk_vote_cnt--;
+		if (ipa3_ctx->q6_proxy_clk_vote_cnt == 0)
+			ipa3_ctx->q6_proxy_clk_vote_valid = false;
 	}
+	mutex_unlock(&ipa3_ctx->q6_proxy_clk_vote_mutex);
 }
 
 /**
@@ -2974,10 +3003,17 @@ void ipa3_proxy_clk_unvote(void)
  */
 void ipa3_proxy_clk_vote(void)
 {
-	if (ipa3_is_ready() && !ipa3_ctx->q6_proxy_clk_vote_valid) {
+	if (!ipa3_is_ready())
+		return;
+
+	mutex_lock(&ipa3_ctx->q6_proxy_clk_vote_mutex);
+	if (!ipa3_ctx->q6_proxy_clk_vote_valid ||
+		(ipa3_ctx->q6_proxy_clk_vote_cnt > 0)) {
 		IPA_ACTIVE_CLIENTS_INC_SPECIAL("PROXY_CLK_VOTE");
+		ipa3_ctx->q6_proxy_clk_vote_cnt++;
 		ipa3_ctx->q6_proxy_clk_vote_valid = true;
 	}
+	mutex_unlock(&ipa3_ctx->q6_proxy_clk_vote_mutex);
 }
 
 /**
@@ -3488,6 +3524,51 @@ void ipa3_suspend_apps_pipes(bool suspend)
 	}
 }
 
+int ipa3_allocate_dma_task_for_gsi(void)
+{
+	struct ipahal_imm_cmd_dma_task_32b_addr cmd = { 0 };
+
+	IPADBG("Allocate mem\n");
+	ipa3_ctx->dma_task_info.mem.size = IPA_GSI_CHANNEL_STOP_PKT_SIZE;
+	ipa3_ctx->dma_task_info.mem.base = dma_alloc_coherent(ipa3_ctx->pdev,
+		ipa3_ctx->dma_task_info.mem.size,
+		&ipa3_ctx->dma_task_info.mem.phys_base,
+		GFP_KERNEL);
+	if (!ipa3_ctx->dma_task_info.mem.base) {
+		IPAERR("no mem\n");
+		return -EFAULT;
+	}
+
+	cmd.flsh = 1;
+	cmd.size1 = ipa3_ctx->dma_task_info.mem.size;
+	cmd.addr1 = ipa3_ctx->dma_task_info.mem.phys_base;
+	cmd.packet_size = ipa3_ctx->dma_task_info.mem.size;
+	ipa3_ctx->dma_task_info.cmd_pyld = ipahal_construct_imm_cmd(
+			IPA_IMM_CMD_DMA_TASK_32B_ADDR, &cmd, false);
+	if (!ipa3_ctx->dma_task_info.cmd_pyld) {
+		IPAERR("failed to construct dma_task_32b_addr cmd\n");
+		dma_free_coherent(ipa3_ctx->pdev,
+			ipa3_ctx->dma_task_info.mem.size,
+			ipa3_ctx->dma_task_info.mem.base,
+			ipa3_ctx->dma_task_info.mem.phys_base);
+		memset(&ipa3_ctx->dma_task_info, 0,
+			sizeof(ipa3_ctx->dma_task_info));
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+void ipa3_free_dma_task_for_gsi(void)
+{
+	dma_free_coherent(ipa3_ctx->pdev,
+		ipa3_ctx->dma_task_info.mem.size,
+		ipa3_ctx->dma_task_info.mem.base,
+		ipa3_ctx->dma_task_info.mem.phys_base);
+	ipahal_destroy_imm_cmd(ipa3_ctx->dma_task_info.cmd_pyld);
+	memset(&ipa3_ctx->dma_task_info, 0, sizeof(ipa3_ctx->dma_task_info));
+}
+
 /**
  * ipa3_inject_dma_task_for_gsi()- Send DMA_TASK to IPA for GSI stop channel
  *
@@ -3496,41 +3577,12 @@ void ipa3_suspend_apps_pipes(bool suspend)
  */
 int ipa3_inject_dma_task_for_gsi(void)
 {
-	static struct ipa_mem_buffer mem = {0};
-	struct ipahal_imm_cmd_dma_task_32b_addr cmd = {0};
-	static struct ipahal_imm_cmd_pyld *cmd_pyld;
 	struct ipa3_desc desc = {0};
-
-	/* allocate the memory only for the very first time */
-	if (!mem.base) {
-		IPADBG("Allocate mem\n");
-		mem.size = IPA_GSI_CHANNEL_STOP_PKT_SIZE;
-		mem.base = dma_alloc_coherent(ipa3_ctx->pdev,
-			mem.size,
-			&mem.phys_base,
-			GFP_KERNEL);
-		if (!mem.base) {
-			IPAERR("no mem\n");
-			return -EFAULT;
-		}
-	}
-	if (!cmd_pyld) {
-		cmd.flsh = 1;
-		cmd.size1 = mem.size;
-		cmd.addr1 = mem.phys_base;
-		cmd.packet_size = mem.size;
-		cmd_pyld = ipahal_construct_imm_cmd(
-			IPA_IMM_CMD_DMA_TASK_32B_ADDR, &cmd, false);
-		if (!cmd_pyld) {
-			IPAERR("failed to construct dma_task_32b_addr cmd\n");
-			return -EFAULT;
-		}
-	}
 
 	desc.opcode = ipahal_imm_cmd_get_opcode_param(
 		IPA_IMM_CMD_DMA_TASK_32B_ADDR, 1);
-	desc.pyld = cmd_pyld->data;
-	desc.len = cmd_pyld->len;
+	desc.pyld = ipa3_ctx->dma_task_info.cmd_pyld->data;
+	desc.len = ipa3_ctx->dma_task_info.cmd_pyld->len;
 	desc.type = IPA_IMM_CMD_DESC;
 
 	IPADBG("sending 1B packet to IPA\n");

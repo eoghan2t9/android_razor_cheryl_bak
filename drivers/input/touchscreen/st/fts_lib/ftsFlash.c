@@ -673,7 +673,7 @@ int parseBinFile(u8* data, int fw_size, Firmware *fwData, int keep_cx)
         index+=FW_BYTES_ALLIGN;
         u8ToU32(&data[index],&temp);
         fwData->config_id = temp;
-        logError(1, "%s parseBinFile: FILE Config ID = %08X\n", tag, temp);
+	    logError(1, "%s parseBinFile: FILE Config ID = %04X\n", tag, fwData->config_id);
 
         index+=FW_BYTES_ALLIGN;
         u8ToU32(&data[index],&temp);
@@ -1030,7 +1030,13 @@ int flash_burn(Firmware fw, int force_burn,int keep_cx)
 {
     int res;
 
-    if (!force_burn)
+    //Workaround for Touch firmware A883.0A11, if FW version is A883, Upgrade it.
+    if(!force_burn && (ftsInfo.u16_fwVer == 0xA883) && (ftsInfo.u16_cfgId == 0x0A11))
+    {
+        logError(1, "%s FW version = %x, Config ID = %x, it's a test version, upgrade it to formal version\n", tag, ftsInfo.u16_fwVer, ftsInfo.u16_cfgId);
+	goto start;
+    }
+    else if (!force_burn && (ftsInfo.u16_fwVer >= fw.fw_ver) && (ftsInfo.u16_cfgId >= fw.config_id))
     {
         for(res = EXTERNAL_RELEASE_INFO_SIZE-1; res >=0; res--)
         {

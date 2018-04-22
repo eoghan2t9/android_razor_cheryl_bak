@@ -107,6 +107,15 @@
 	ibb-supply = <&ibb_regulator>;
 	hw-config = "split_dsi";
 
+	qcom,phy-supply-entries {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		qcom,phy-supply-entry@0 {
+			/delete-property/qcom,supply-lp-mode-disable-allowed;
+		};
+	};
+
 };
 
 &soc {

@@ -221,6 +221,7 @@ struct ext4_io_submit {
 #define	EXT4_MAX_BLOCK_SIZE		65536
 #define EXT4_MIN_BLOCK_LOG_SIZE		10
 #define EXT4_MAX_BLOCK_LOG_SIZE		16
+#define EXT4_MAX_CLUSTER_LOG_SIZE	30
 #ifdef __KERNEL__
 # define EXT4_BLOCK_SIZE(s)		((s)->s_blocksize)
 #else
@@ -589,6 +590,7 @@ enum {
 #define EXT4_ENCRYPTION_MODE_AES_256_CBC	3
 #define EXT4_ENCRYPTION_MODE_AES_256_CTS	4
 #define EXT4_ENCRYPTION_MODE_PRIVATE		127
+#define EXT4_ENCRYPTION_MODE_AES_256_HEH	126
 
 #include "ext4_crypto.h"
 
@@ -1441,7 +1443,7 @@ struct ext4_sb_info {
 	struct list_head s_es_list;	/* List of inodes with reclaimable extents */
 	long s_es_nr_inode;
 	struct ext4_es_stats s_es_stats;
-	struct mb_cache *s_mb_cache;
+	struct mb2_cache *s_mb_cache;
 	spinlock_t s_es_lock ____cacheline_aligned_in_smp;
 
 	/* Ratelimit ext4 messages. */
@@ -2269,7 +2271,8 @@ struct page *ext4_encrypt(struct inode *inode,
 			  struct page *plaintext_page,
 			  gfp_t gfp_flags);
 int ext4_decrypt(struct page *page);
-int ext4_encrypted_zeroout(struct inode *inode, struct ext4_extent *ex);
+int ext4_encrypted_zeroout(struct inode *inode, ext4_lblk_t lblk,
+			   ext4_fsblk_t pblk, ext4_lblk_t len);
 extern const struct dentry_operations ext4_encrypted_d_ops;
 
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
@@ -2338,19 +2341,6 @@ int _ext4_get_encryption_info(struct inode *inode);
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 int ext4_has_encryption_key(struct inode *inode);
 
-static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
-{
-	return EXT4_I(inode)->i_crypt_info;
-}
-
-static inline int ext4_using_hardware_encryption(struct inode *inode)
-{
-	struct ext4_crypt_info *ci = ext4_encryption_info(inode);
-
-	return S_ISREG(inode->i_mode) && ci &&
-		ci->ci_data_mode == EXT4_ENCRYPTION_MODE_PRIVATE;
-}
-
 static inline int ext4_get_encryption_info(struct inode *inode)
 {
 	struct ext4_crypt_info *ci = EXT4_I(inode)->i_crypt_info;
@@ -2362,6 +2352,19 @@ static inline int ext4_get_encryption_info(struct inode *inode)
 					   (1 << KEY_FLAG_DEAD)))))
 		return _ext4_get_encryption_info(inode);
 	return 0;
+}
+
+static inline struct ext4_crypt_info *ext4_encryption_info(struct inode *inode)
+{
+	return EXT4_I(inode)->i_crypt_info;
+}
+
+static inline int ext4_using_hardware_encryption(struct inode *inode)
+{
+	struct ext4_crypt_info *ci = ext4_encryption_info(inode);
+
+	return S_ISREG(inode->i_mode) && ci &&
+		ci->ci_data_mode == EXT4_ENCRYPTION_MODE_PRIVATE;
 }
 
 #else
@@ -2537,6 +2540,8 @@ extern int ext4_filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
 extern qsize_t *ext4_get_reserved_space(struct inode *inode);
 extern void ext4_da_update_reserve_space(struct inode *inode,
 					int used, int quota_claim);
+extern int ext4_issue_zeroout(struct inode *inode, ext4_lblk_t lblk,
+			      ext4_fsblk_t pblk, ext4_lblk_t len);
 
 /* indirect.c */
 extern int ext4_ind_map_blocks(handle_t *handle, struct inode *inode,
