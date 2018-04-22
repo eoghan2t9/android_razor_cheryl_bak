@@ -12,7 +12,7 @@ THREAD="-j$(grep -c ^processor /proc/cpuinfo)"
 KERNEL="Image.gz-dtb"
 DEFCONFIG="cheryl_defconfig"
 
-VER="Razer-Kernel-V1"
+VER="Razer-Kernel-V2"
 
 # Paths
 KERNEL_DIR=$(pwd)
