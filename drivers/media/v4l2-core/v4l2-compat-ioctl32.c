@@ -446,7 +446,6 @@ static int put_v4l2_plane32(struct v4l2_plane __user *up,
 			return -EFAULT;
         break;
 	}
->>>>>>> c6cbc2c... media: v4l2-compat-ioctl32.c: copy m.userptr in put_v4l2_plane32
 
 	return 0;
 }
@@ -1023,7 +1022,6 @@ static long do_video_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	int compatible_arg = 1;
 	long err = 0;
 
-	memset(&karg, 0, sizeof(karg));
 	/* First, convert the command. */
 	switch (cmd) {
 	case VIDIOC_G_FMT32: cmd = VIDIOC_G_FMT; break;

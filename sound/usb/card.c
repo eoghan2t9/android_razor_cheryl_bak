@@ -282,30 +282,22 @@ static int snd_usb_create_streams(struct snd_usb_audio *chip, int ctrlif)
 	struct usb_host_interface *host_iface;
 	struct usb_interface_descriptor *altsd;
 	struct usb_interface *usb_iface;
+	void *control_header;
 	int i, protocol;
 	int rest_bytes;
 
-	usb_iface = usb_ifnum_to_if(dev, ctrlif);
-	if (!usb_iface) {
-		snd_printk(KERN_ERR "%d:%u : does not exist\n",
-					dev->devnum, ctrlif);
-		return -EINVAL;
-	}
-
 	/* find audiocontrol interface */
-	host_iface = &usb_iface->altsetting[0];
-	if (!host_iface) {
-		snd_printk(KERN_ERR "Audio Control interface is not available.");
-		return -EINVAL;
-	}
-
+	host_iface = &usb_ifnum_to_if(dev, ctrlif)->altsetting[0];
+	control_header = snd_usb_find_csint_desc(host_iface->extra,
+						 host_iface->extralen,
+						 NULL, UAC_HEADER);
 	altsd = get_iface_desc(host_iface);
 	protocol = altsd->bInterfaceProtocol;
 
-	/*
-	 * UAC 1.0 devices use AC HEADER Desc for linking AS interfaces;
-	 * UAC 2.0 and 3.0 devices use IAD for linking AS interfaces
-	 */
+	if (!control_header) {
+		dev_err(&dev->dev, "cannot find UAC_HEADER\n");
+		return -EINVAL;
+	}
 
 	rest_bytes = (void *)(host_iface->extra + host_iface->extralen) -
 		control_header;
@@ -325,14 +317,7 @@ static int snd_usb_create_streams(struct snd_usb_audio *chip, int ctrlif)
 
 	case UAC_VERSION_1: {
 		void *control_header;
-		struct uac1_ac_header_descriptor *h1;
-
-		control_header = snd_usb_find_csint_desc(host_iface->extra,
-					host_iface->extralen, NULL, UAC_HEADER);
-		if (!control_header) {
-			dev_err(&dev->dev, "cannot find UAC_HEADER\n");
-			return -EINVAL;
-		}
+		struct uac1_ac_header_descriptor *h1 = control_header;
 
 		if (rest_bytes < sizeof(*h1)) {
 			dev_err(&dev->dev, "too short v1 buffer descriptor\n");

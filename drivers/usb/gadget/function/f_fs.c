@@ -3986,6 +3986,7 @@ static void ffs_closed(struct ffs_data *ffs)
 {
 	struct ffs_dev *ffs_obj;
 	struct f_fs_opts *opts;
+	struct config_item *ci;
 
 	ENTER();
 
@@ -4019,6 +4020,7 @@ static void ffs_closed(struct ffs_data *ffs)
 		goto done;
 	}
 
+	ci = opts->func_inst.group.cg_item.ci_parent->ci_parent;
 	ffs_dev_unlock();
 
 	if (test_bit(FFS_FL_BOUND, &ffs->flags))
